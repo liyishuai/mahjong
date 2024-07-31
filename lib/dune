@@ -1,0 +1,3 @@
+(library
+ (name mahjong)
+ (public_name mahjong.lib))
