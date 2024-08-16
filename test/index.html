@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safe Integer Input with Slider</title>
+</head>
+<body>
+    <label for="safeIntegerInput">Enter a safe integer:</label>
+    <input type="number" id="safeIntegerInput" name="safeIntegerInput">
+    <br><br>
+    <label for="safeIntegerSlider">Or use the slider:</label>
+    <input type="range" id="safeIntegerSlider" name="safeIntegerSlider">
+    <br><br>
+    <input type="submit" value="Submit">
+
+    <script>
+        // Set the min and max attributes to JavaScript's safe integer range
+        const safeIntegerInput = document.getElementById('safeIntegerInput');
+        const safeIntegerSlider = document.getElementById('safeIntegerSlider');
+        
+        const minSafeInteger = Number.MIN_SAFE_INTEGER;
+        const maxSafeInteger = Number.MAX_SAFE_INTEGER;
+
+        safeIntegerInput.min = minSafeInteger;
+        safeIntegerInput.max = maxSafeInteger;
+        safeIntegerSlider.min = minSafeInteger;
+        safeIntegerSlider.max = maxSafeInteger;
+
+        // Sync the number input and slider
+        safeIntegerInput.addEventListener('input', function() {
+            safeIntegerSlider.value = this.value;
+        });
+
+        safeIntegerSlider.addEventListener('input', function() {
+            safeIntegerInput.value = this.value;
+        });
+    </script>
+</body>
+</html>
