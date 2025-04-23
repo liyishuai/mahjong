@@ -1,4 +1,4 @@
-(lang dune 3.16)
+(lang dune 3.13)
 
 (name mahjong)
 
@@ -12,7 +12,6 @@
 (maintainers "Yishuai Li")
 
 (license MPL-2.0)
-
 
 (package
  (name mahjong)
