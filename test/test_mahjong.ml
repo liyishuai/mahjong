@@ -1,6 +1,7 @@
 open Mahjong
 
-let hash (s : string) : string = Digest.BLAKE512.(to_hex (string s));;
+(* Use MD5 for backward compatibility with OCaml 4.x *)
+let hash (s : string) : string = Digest.(to_hex (string s));;
 
 Random.self_init ()
 

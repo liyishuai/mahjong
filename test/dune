@@ -1,3 +1,9 @@
 (test
  (name test_mahjong)
+ (modules test_mahjong)
+ (libraries mahjong.lib))
+
+(test
+ (name test_simulation)
+ (modules test_simulation)
  (libraries mahjong.lib))
