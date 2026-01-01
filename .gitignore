@@ -30,3 +30,10 @@ setup.log
 
 # Local OPAM switch
 _opam/
+
+# Python
+*.pyc
+__pycache__/
+
+# Training output
+training_output/
