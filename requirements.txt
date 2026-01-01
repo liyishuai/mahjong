@@ -1,0 +1,14 @@
+# Mahjong AI - Python Dependencies
+
+# Core dependencies
+numpy>=1.20.0
+
+# Web server
+aiohttp>=3.8.0
+
+# MLX for Apple Silicon training (optional)
+# Only install on macOS with Apple Silicon
+# mlx>=0.0.5
+
+# Development dependencies
+# pytest>=7.0.0

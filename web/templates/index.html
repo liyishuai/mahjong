@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mahjong AI - Training & Play</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>🀄 Mahjong AI</h1>
+            <nav>
+                <button onclick="showPage('training')" class="nav-btn active" id="nav-training">Training</button>
+                <button onclick="showPage('play')" class="nav-btn" id="nav-play">Play vs AI</button>
+                <button onclick="showPage('tenhou')" class="nav-btn" id="nav-tenhou">Tenhou Bot</button>
+            </nav>
+        </header>
+
+        <!-- Training Dashboard -->
+        <div id="training-page" class="page active">
+            <div class="dashboard">
+                <div class="panel stats-panel">
+                    <h2>Training Statistics</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-value" id="games-played">0</span>
+                            <span class="stat-label">Games Played</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="win-rate">0%</span>
+                            <span class="stat-label">Win Rate</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="avg-score">0</span>
+                            <span class="stat-label">Avg Score</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="training-loss">-</span>
+                            <span class="stat-label">Loss</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="panel config-panel">
+                    <h2>Training Configuration</h2>
+                    <form id="training-config">
+                        <div class="form-group">
+                            <label>Number of Games</label>
+                            <input type="number" id="num-games" value="1000" min="10" max="100000">
+                        </div>
+                        <div class="form-group">
+                            <label>Batch Size</label>
+                            <input type="number" id="batch-size" value="64" min="1" max="512">
+                        </div>
+                        <div class="form-group">
+                            <label>Learning Rate</label>
+                            <input type="number" id="learning-rate" value="0.001" step="0.0001" min="0.00001" max="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Game Mode</label>
+                            <select id="game-mode">
+                                <option value="4p-half">4 Player - Half Game (半庄)</option>
+                                <option value="4p-east">4 Player - East Only (東風)</option>
+                                <option value="3p-half">3 Player - Half Game (三麻半庄)</option>
+                                <option value="3p-east">3 Player - East Only (三麻東風)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="use-mlx" checked>
+                                Use MLX (Apple Silicon)
+                            </label>
+                        </div>
+                        <button type="button" onclick="startTraining()" class="btn primary">Start Training</button>
+                        <button type="button" onclick="stopTraining()" class="btn secondary">Stop</button>
+                    </form>
+                </div>
+
+                <div class="panel chart-panel">
+                    <h2>Training Progress</h2>
+                    <canvas id="training-chart"></canvas>
+                </div>
+
+                <div class="panel log-panel">
+                    <h2>Training Log</h2>
+                    <div id="training-log" class="log-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Play vs AI Page -->
+        <div id="play-page" class="page">
+            <div class="game-container">
+                <div class="game-info">
+                    <div class="round-info">
+                        <span id="round-wind">東</span><span id="round-num">1</span>局
+                        <span id="honba">0本場</span>
+                    </div>
+                    <div class="dora-display">
+                        <span>ドラ:</span>
+                        <div id="dora-tiles" class="tile-row"></div>
+                    </div>
+                </div>
+
+                <div class="table">
+                    <!-- Opponent (top) -->
+                    <div class="player-area opponent top">
+                        <div class="player-info">
+                            <span class="player-name">AI (対面)</span>
+                            <span class="player-points" id="opp-top-points">25000</span>
+                        </div>
+                        <div class="hand hidden-hand" id="opp-top-hand"></div>
+                        <div class="river" id="opp-top-river"></div>
+                    </div>
+
+                    <!-- Opponent (left) -->
+                    <div class="player-area opponent left">
+                        <div class="player-info">
+                            <span class="player-name">AI (上家)</span>
+                            <span class="player-points" id="opp-left-points">25000</span>
+                        </div>
+                        <div class="hand hidden-hand vertical" id="opp-left-hand"></div>
+                        <div class="river vertical" id="opp-left-river"></div>
+                    </div>
+
+                    <!-- Center area -->
+                    <div class="center-area">
+                        <div id="wall-count">残り: 70</div>
+                        <div id="riichi-sticks"></div>
+                    </div>
+
+                    <!-- Opponent (right) -->
+                    <div class="player-area opponent right">
+                        <div class="player-info">
+                            <span class="player-name">AI (下家)</span>
+                            <span class="player-points" id="opp-right-points">25000</span>
+                        </div>
+                        <div class="hand hidden-hand vertical" id="opp-right-hand"></div>
+                        <div class="river vertical" id="opp-right-river"></div>
+                    </div>
+
+                    <!-- Player (bottom) -->
+                    <div class="player-area self bottom">
+                        <div class="player-info">
+                            <span class="player-name">あなた</span>
+                            <span class="player-points" id="self-points">25000</span>
+                        </div>
+                        <div class="river" id="self-river"></div>
+                        <div class="hand" id="self-hand"></div>
+                        <div class="melds" id="self-melds"></div>
+                    </div>
+                </div>
+
+                <div class="action-panel">
+                    <button onclick="gameAction('tsumo')" class="btn action-btn" id="btn-tsumo" disabled>ツモ</button>
+                    <button onclick="gameAction('ron')" class="btn action-btn" id="btn-ron" disabled>ロン</button>
+                    <button onclick="gameAction('riichi')" class="btn action-btn" id="btn-riichi" disabled>リーチ</button>
+                    <button onclick="gameAction('chi')" class="btn action-btn" id="btn-chi" disabled>チー</button>
+                    <button onclick="gameAction('pon')" class="btn action-btn" id="btn-pon" disabled>ポン</button>
+                    <button onclick="gameAction('kan')" class="btn action-btn" id="btn-kan" disabled>カン</button>
+                    <button onclick="gameAction('pass')" class="btn action-btn" id="btn-pass">パス</button>
+                </div>
+
+                <div class="game-controls">
+                    <button onclick="newGame()" class="btn primary">New Game</button>
+                    <select id="ai-difficulty">
+                        <option value="easy">Easy</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="hard">Hard</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tenhou Bot Page -->
+        <div id="tenhou-page" class="page">
+            <div class="tenhou-container">
+                <div class="panel">
+                    <h2>Tenhou Bot Configuration</h2>
+                    <form id="tenhou-config">
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" id="tenhou-username" placeholder="NoName">
+                        </div>
+                        <div class="form-group">
+                            <label>Auth Token</label>
+                            <input type="password" id="tenhou-auth" placeholder="Optional">
+                        </div>
+                        <div class="form-group">
+                            <label>Lobby</label>
+                            <select id="tenhou-lobby">
+                                <option value="0">般 (General)</option>
+                                <option value="1">上 (Upper Dan)</option>
+                                <option value="2">特 (Tokujou)</option>
+                                <option value="3">鳳 (Houou)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Game Type</label>
+                            <select id="tenhou-game-type">
+                                <option value="9">四人東 (4P East)</option>
+                                <option value="41">四人南 (4P South)</option>
+                                <option value="193">三人東 (3P East)</option>
+                                <option value="225">三人南 (3P South)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Strategy</label>
+                            <select id="tenhou-strategy">
+                                <option value="trained">Trained Model</option>
+                                <option value="random">Random (Testing)</option>
+                                <option value="defensive">Defensive</option>
+                            </select>
+                        </div>
+                        <button type="button" onclick="connectTenhou()" class="btn primary" id="tenhou-connect">Connect</button>
+                        <button type="button" onclick="disconnectTenhou()" class="btn secondary" id="tenhou-disconnect" disabled>Disconnect</button>
+                    </form>
+                </div>
+
+                <div class="panel">
+                    <h2>Connection Status</h2>
+                    <div class="status-indicator" id="tenhou-status">
+                        <span class="status-dot disconnected"></span>
+                        <span>Disconnected</span>
+                    </div>
+                    <div id="tenhou-game-info" class="game-info-panel"></div>
+                </div>
+
+                <div class="panel log-panel">
+                    <h2>Game Log</h2>
+                    <div id="tenhou-log" class="log-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

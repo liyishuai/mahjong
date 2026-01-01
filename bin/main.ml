@@ -1,7 +1,23 @@
 open Mahjong
 
-let () =
-  print_endline "=== Mahjong Simulator with Tenhou Bot ===\n";
+(** Parse command line arguments *)
+let parse_args () =
+  let mode = ref "info" in
+  let port = ref 8080 in
+  let games = ref 1000 in
+  let specs = [
+    ("--web", Arg.Unit (fun () -> mode := "web"), "Start web server");
+    ("--train", Arg.Unit (fun () -> mode := "train"), "Run training simulation");
+    ("--tenhou", Arg.Unit (fun () -> mode := "tenhou"), "Start Tenhou bot");
+    ("--port", Arg.Set_int port, "Web server port (default: 8080)");
+    ("--games", Arg.Set_int games, "Number of games to simulate (default: 1000)");
+  ] in
+  Arg.parse specs (fun _ -> ()) "Mahjong AI - Usage: mahjong [options]";
+  (!mode, !port, !games)
+
+(** Show information and demo *)
+let show_info () =
+  print_endline "=== Mahjong AI System ===\n";
   
   (* Initialize random state *)
   Random.self_init ();
@@ -65,8 +81,8 @@ let () =
   print_endline "\n=== Neural Network Interface ===\n";
   print_endline "Training architecture:";
   print_endline "  - OCaml: Game logic, Tenhou protocol, state management";
-  print_endline "  - External NN (Python/Swift): Training, inference on Mac";
-  print_endline "  - Communication: JSON via file or socket\n";
+  print_endline "  - MLX (Python): Neural network training on Apple Silicon";
+  print_endline "  - Communication: JSON via file or WebSocket\n";
   
   print_endline "Feature vector size: ~800+ dimensions";
   print_endline "  - Hand encoding: 136 (one-hot)";
@@ -74,11 +90,56 @@ let () =
   print_endline "  - Game state: ~50 features";
   print_endline "  - Strategic hints: ~100 features\n";
   
-  print_endline "To train on Mac:";
-  print_endline "  1. Run OCaml bot to collect training data";
-  print_endline "  2. Load data into Python/TensorFlow or Swift/CoreML";
-  print_endline "  3. Train neural network";
-  print_endline "  4. Export model for inference";
-  print_endline "  5. Connect trained model to Tenhou bot\n";
+  print_endline "=== Usage ===\n";
+  print_endline "Start web interface:";
+  print_endline "  python -m web.server --port 8080\n";
+  print_endline "Train with MLX:";
+  print_endline "  python -m mlx_training.train --games 10000 --mode 4p-half\n";
+  print_endline "Run simulation:";
+  print_endline "  ./mahjong --train --games 1000\n";
+  print_endline "Connect to Tenhou:";
+  print_endline "  ./mahjong --tenhou"
+
+(** Run training simulation *)
+let run_training num_games =
+  Printf.printf "=== Training Simulation ===\n\n";
+  Printf.printf "Running %d games...\n" num_games;
   
-  print_endline "Ready for Tenhou connection. Set username and auth_token in config."
+  let rules = Rules.default_four_player in
+  let config = { Training.default_config with num_games } in
+  
+  Training.train config;
+  
+  print_endline "\nTraining complete!"
+
+(** Start web server info *)
+let start_web port =
+  Printf.printf "=== Web Server ===\n\n";
+  Printf.printf "To start the web server, run:\n";
+  Printf.printf "  python -m web.server --port %d\n\n" port;
+  Printf.printf "Then open http://localhost:%d in your browser.\n\n" port;
+  print_endline "Features:";
+  print_endline "  - Training progress visualization";
+  print_endline "  - Human vs AI gameplay";
+  print_endline "  - Tenhou bot control panel"
+
+(** Start Tenhou bot *)
+let start_tenhou () =
+  print_endline "=== Tenhou Bot ===\n";
+  print_endline "Tenhou bot ready.";
+  print_endline "Configure username and auth_token in the code or via web interface.\n";
+  
+  let config = Tenhou_bot.default_config in
+  Printf.printf "Server: %s:%d\n" config.server config.port;
+  Printf.printf "Lobby: %d\n" config.lobby;
+  Printf.printf "Game type: %d\n\n" config.game_type;
+  
+  print_endline "Note: Actual connection requires network socket implementation."
+
+let () =
+  let (mode, port, games) = parse_args () in
+  match mode with
+  | "web" -> start_web port
+  | "train" -> run_training games
+  | "tenhou" -> start_tenhou ()
+  | _ -> show_info ()
