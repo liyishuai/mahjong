@@ -233,7 +233,24 @@ let calculate_reward (result : round_result) (player_idx : int) (state : game_st
          | _ -> 0.0)
   | Draw _ -> 0.0
 
-(** Simple policy: weighted random selection *)
+(** Simple heuristic policy for action selection.
+    
+    This policy assigns weights to each action based on the current game state
+    and features, then uses weighted random sampling to select an action.
+    
+    Weight assignments:
+    - Winning actions (Tsumo/Ron): Highest priority (100.0) - always take a win
+    - Draw action: Standard weight (1.0)
+    - Discard: Slightly lower (0.8) unless in riichi (forced tsumogiri)
+    - Riichi: High weight (10.0) if tenpai and sufficient points, else low (0.1)
+    - Calls (Pon/Chi): Moderate weight (0.2-0.3) if few open melds, lower otherwise
+      to maintain hand flexibility and yaku options
+    - Pass: Medium weight (0.5) to balance between calling and keeping closed
+    - Kyuushukyuuhai: Low weight (0.1) as it ends the round without scoring
+    
+    This is a baseline policy for data generation. For actual gameplay,
+    use the neural network interface with a trained model.
+*)
 let policy_action (features : features) (actions : action list) : action =
   (* Weight actions based on features *)
   let weights = List.map (fun action ->
@@ -282,7 +299,7 @@ let collect_samples (state : game_state) (choose_action : game_state -> action l
           let reward = calculate_reward result player_idx state in
           samples := { state_features = features; action_taken = action; reward } :: !samples;
           (* Update previous samples with discounted reward *)
-          let discount = 0.99 in
+          let discount = default_config.discount_factor in
           let rec update_rewards lst discount_factor =
             match lst with
             | [] -> []

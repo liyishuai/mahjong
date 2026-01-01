@@ -135,7 +135,7 @@ let seat_wind_for_player (_round_wind : wind) (dealer : int) (player_idx : int) 
 let next_wind (w : wind) (num_players : int) : wind =
   match w with
   | East -> South
-  | South -> if num_players = 3 then West else West
+  | South -> West
   | West -> if num_players = 3 then East else North
   | North -> East
 
@@ -179,9 +179,12 @@ let init_game_state (rules : rules) (seed : int array) : game_state =
   ; rng_state = seed
   }
 
+(** Dead wall size: 14 tiles (7 pairs for dora indicators + rinshan) *)
+let dead_wall_size = 14
+
 (** Get remaining tiles in wall *)
 let remaining_wall_tiles (state : game_state) : int =
-  Array.length state.round.wall - state.round.wall_index - (14 + 4 * state.round.kan_count)
+  Array.length state.round.wall - state.round.wall_index - (dead_wall_size + 4 * state.round.kan_count)
 
 (** Check if wall is exhausted *)
 let is_wall_exhausted (state : game_state) : bool =

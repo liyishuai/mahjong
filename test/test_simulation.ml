@@ -120,6 +120,65 @@ let test_training_config () =
   
   print_endline "✓ Training config tests passed"
 
+(** Test Tenhou tile encoding *)
+let test_tenhou_encoding () =
+  (* Test basic tile encoding *)
+  let man1 = Tiles.Man Tiles.One in
+  let code = Tenhou_protocol.tenhou_tile_of_tile man1 0 in
+  assert (code >= 0 && code < 4);
+  
+  (* Test roundtrip *)
+  let decoded = Tenhou_protocol.tile_of_tenhou_tile code in
+  (match decoded with
+   | Tiles.Man Tiles.One -> ()
+   | _ -> assert false);
+  
+  (* Test aka tiles *)
+  let man_aka = Tiles.Man Tiles.Aka in
+  let aka_code = Tenhou_protocol.tenhou_tile_of_tile man_aka 0 in
+  assert (aka_code = 16);  (* Man 5 aka is tile 16 *)
+  
+  (* Test honor tiles *)
+  let east = Tiles.Honor Tiles.East in
+  let east_code = Tenhou_protocol.tenhou_tile_of_tile east 0 in
+  assert (east_code >= 108 && east_code < 112);
+  
+  print_endline "✓ Tenhou encoding tests passed"
+
+(** Test Tenhou protocol parsing *)
+let test_tenhou_protocol () =
+  (* Test parsing INIT message *)
+  let init_xml = "<INIT seed=\"0,0,0,1,2,34\" ten=\"250,250,250,250\" oya=\"0\" hai=\"1,2,3,4,5,6,7,8,9,10,11,12,13\"/>" in
+  (match Tenhou_protocol.parse_message init_xml with
+   | Tenhou_protocol.Init info ->
+       assert (Array.length info.seed = 6);
+       assert (Array.length info.hai = 13);
+       assert (info.oya = 0)
+   | _ -> assert false);
+  
+  (* Test parsing draw message *)
+  let draw_xml = "<T45/>" in
+  (match Tenhou_protocol.parse_message draw_xml with
+   | Tenhou_protocol.Draw tile -> assert (tile = 45)
+   | _ -> assert false);
+  
+  (* Test encoding discard *)
+  let discard = Tenhou_protocol.encode_discard 45 in
+  assert (String.length discard > 0);
+  
+  print_endline "✓ Tenhou protocol tests passed"
+
+(** Test Tenhou bot state *)
+let test_tenhou_bot () =
+  let config = Tenhou_bot.default_config in
+  let state = Tenhou_bot.init_bot_state config in
+  
+  assert (Array.length state.Tenhou_bot.points = 4);
+  assert (state.Tenhou_bot.seat = 0);
+  assert (Array.length state.Tenhou_bot.hand = 0);
+  
+  print_endline "✓ Tenhou bot tests passed"
+
 (** Run all tests *)
 let () =
   print_endline "\n=== Running Simulation Tests ===\n";
@@ -129,4 +188,7 @@ let () =
   test_simulation_draw ();
   test_feature_extraction ();
   test_training_config ();
+  test_tenhou_encoding ();
+  test_tenhou_protocol ();
+  test_tenhou_bot ();
   print_endline "\n=== All Tests Passed ===\n"

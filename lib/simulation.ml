@@ -91,9 +91,10 @@ let can_ankan (player : player_state) (tile : tile) : bool =
   count_tiles player.hand.tiles (tiles_match tile) >= 4
 
 (** Calculate score for a tsumo win *)
-let calculate_tsumo_score (_state : game_state) (_winner_idx : int) (_han : int) (_fu : int) : int array =
+let calculate_tsumo_score (state : game_state) (_winner_idx : int) (_han : int) (_fu : int) : int array =
   (* Simplified scoring - full implementation would be complex *)
-  [|0; 0; 0; 0|]
+  let n = num_players state.rules in
+  Array.make n 0
 
 (** Calculate score for a ron win *)
 let calculate_ron_score (_state : game_state) (_winner_idx : int) (_loser_idx : int) (_han : int) (_fu : int) : int =
@@ -173,8 +174,9 @@ let apply_action (state : game_state) (action : action) : action_result =
              if not (can_pon player tile) then Invalid "Cannot pon"
              else
                (* Remove 2 matching tiles from hand, add pon to furos *)
+               let n = num_players state.rules in
                let source = 
-                 let diff = (state.round.current_player - target_idx + num_players state.rules) mod num_players state.rules in
+                 let diff = (state.round.current_player - target_idx + n) mod n in
                  match diff with
                  | 1 -> Kami
                  | 2 -> Toimen
@@ -268,18 +270,33 @@ let valid_actions (state : game_state) : action list =
   
   !actions
 
+(** Maximum number of invalid action retries before fallback *)
+let max_invalid_retries = 100
+
 (** Simulate a single round *)
-let rec simulate_round (state : game_state) (choose_action : game_state -> action list -> action) : game_state * round_result =
-  let actions = valid_actions state in
-  let action = choose_action state actions in
-  match apply_action state action with
-  | Continue new_state -> simulate_round new_state choose_action
-  | RoundEnd (new_state, result) -> (new_state, result)
-  | GameEnd (new_state, scores) -> 
-      (new_state, Draw (Exhaustive ([], Array.to_list scores)))
-  | Invalid msg -> 
-      Printf.printf "Invalid action: %s\n" msg;
-      simulate_round state choose_action
+let rec simulate_round_impl (state : game_state) (choose_action : game_state -> action list -> action) (invalid_count : int) : game_state * round_result =
+  if invalid_count >= max_invalid_retries then
+    (* Fallback: force draw game if too many invalid actions *)
+    (state, Draw (Exhaustive ([], [])))
+  else
+    let actions = valid_actions state in
+    if List.length actions = 0 then
+      (* No valid actions - draw game *)
+      (state, Draw (Exhaustive ([], [])))
+    else
+      let action = choose_action state actions in
+      match apply_action state action with
+      | Continue new_state -> simulate_round_impl new_state choose_action 0
+      | RoundEnd (new_state, result) -> (new_state, result)
+      | GameEnd (new_state, scores) -> 
+          (new_state, Draw (Exhaustive ([], Array.to_list scores)))
+      | Invalid msg -> 
+          Printf.printf "Invalid action: %s (retry %d)\n" msg invalid_count;
+          simulate_round_impl state choose_action (invalid_count + 1)
+
+(** Simulate a single round *)
+let simulate_round (state : game_state) (choose_action : game_state -> action list -> action) : game_state * round_result =
+  simulate_round_impl state choose_action 0
 
 (** Random action selection (for basic simulation) *)
 let random_action (_state : game_state) (actions : action list) : action =

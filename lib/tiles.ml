@@ -34,14 +34,18 @@ let random_set (seed : int array) : tile array =
     Array.concat [aka_set; normal_set; normal_set; normal_set]
   in
   Random.full_init seed ;
-  (* Fisher-Yates shuffle - compatible with OCaml 4.x *)
-  let n = Array.length four_set in
-  for i = n - 1 downto 1 do
-    let j = Random.int (i + 1) in
-    let tmp = four_set.(i) in
-    four_set.(i) <- four_set.(j);
-    four_set.(j) <- tmp
-  done;
+  (* Array.shuffle requires OCaml 5.2+. For older versions, use this fallback: *)
+  (* Fisher-Yates shuffle *)
+  let shuffle_array arr =
+    let n = Array.length arr in
+    for i = n - 1 downto 1 do
+      let j = Random.int (i + 1) in
+      let tmp = arr.(i) in
+      arr.(i) <- arr.(j);
+      arr.(j) <- tmp
+    done
+  in
+  shuffle_array four_set ;
   four_set
 
 let int_of_number (n : number) : int =

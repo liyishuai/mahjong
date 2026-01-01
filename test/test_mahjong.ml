@@ -1,6 +1,6 @@
 open Mahjong
 
-(* Use MD5 for backward compatibility with OCaml 4.x *)
+(* BLAKE512 requires OCaml 5.2+. For older versions, use MD5: Digest.(to_hex (string s)) *)
 let hash (s : string) : string = Digest.(to_hex (string s));;
 
 Random.self_init ()
