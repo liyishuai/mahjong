@@ -2,4 +2,4 @@
  (name mahjong)
  (public_name mahjong.lib)
  (libraries str unix)
- (modules tiles hand rules state simulation training tenhou_protocol tenhou_bot nn_interface))
+ (modules tiles hand rules state simulation training policy))

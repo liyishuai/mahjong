@@ -201,7 +201,9 @@ let apply_action (state : game_state) (action : action) : action_result =
                } in
                Continue { new_state with round = new_round })
   
-  | Pass -> Continue state
+  | Pass ->
+      (* Pass on call opportunity - advance to next player *)
+      Continue (advance_player state)
   
   | DeclareKyuushuKyuuhai ->
       if state.round.turn = 0 && state.round.is_first_turn then
@@ -227,17 +229,17 @@ let apply_action (state : game_state) (action : action) : action_result =
 let valid_actions (state : game_state) : action list =
   let player = current_player state in
   let actions = ref [] in
-  
-  (* Can always pass *)
-  actions := Pass :: !actions;
-  
-  (* Draw if it's player's turn to draw *)
-  if not (is_wall_exhausted state) then
-    actions := DrawAction :: !actions;
-  
-  (* Discard if hand has tiles *)
+
   let hand_size = Array.length player.hand.tiles in
-  if hand_size > 0 then begin
+  let num_furos = Array.length player.hand.furos in
+  let base_hand_size = 13 - (3 * num_furos) in
+
+  (* Draw if hand is at or below base size (initial deal or turn draw) *)
+  if not (is_wall_exhausted state) && hand_size <= base_hand_size then
+    actions := DrawAction :: !actions;
+
+  (* Discard if hand has tiles and is above base size (i.e., just drew) *)
+  if hand_size > base_hand_size then begin
     for i = 0 to hand_size - 1 do
       if not player.is_riichi || i = hand_size - 1 then
         actions := DiscardAction i :: !actions
@@ -256,6 +258,8 @@ let valid_actions (state : game_state) : action list =
   (* Check for calls on last discard *)
   (match state.round.last_discard with
    | Some (_idx, tile) when state.round.current_player <> _idx ->
+       (* Can pass on call opportunities *)
+       actions := Pass :: !actions;
        if can_pon player tile then
          actions := CallPon tile :: !actions;
        if can_minkan player tile then

@@ -6,10 +6,8 @@ let parse_args () =
   let port = ref 8080 in
   let games = ref 1000 in
   let specs = [
-    ("--web", Arg.Unit (fun () -> mode := "web"), "Start web server");
     ("--train", Arg.Unit (fun () -> mode := "train"), "Run training simulation");
-    ("--tenhou", Arg.Unit (fun () -> mode := "tenhou"), "Start Tenhou bot");
-    ("--port", Arg.Set_int port, "Web server port (default: 8080)");
+    ("--demo", Arg.Unit (fun () -> mode := "demo"), "Run demo game with pretty-print");
     ("--games", Arg.Set_int games, "Number of games to simulate (default: 1000)");
   ] in
   Arg.parse specs (fun _ -> ()) "Mahjong AI - Usage: mahjong [options]";
@@ -49,97 +47,77 @@ let show_info () =
   let wall_str = Tiles.string_of_tiles state.round.wall in
   Printf.printf "Wall (first 14): %s\n" (String.sub wall_str 0 (min 42 (String.length wall_str)));
   Printf.printf "Wall total tiles: %d\n\n" (Array.length state.round.wall);
-  
-  (* Show Tenhou bot configuration *)
-  print_endline "=== Tenhou Bot Interface ===\n";
-  let bot_config = Tenhou_bot.default_config in
-  Printf.printf "Tenhou server: %s:%d\n" bot_config.server bot_config.port;
-  Printf.printf "Default lobby: %d\n" bot_config.lobby;
-  Printf.printf "Game type: %d\n\n" bot_config.game_type;
-  
-  (* Demonstrate Tenhou protocol *)
-  print_endline "Tenhou tile encoding examples:";
-  let test_tiles = [|
-    Tiles.Man Tiles.One;
-    Tiles.Man Tiles.Aka;
-    Tiles.Pin Tiles.Five;
-    Tiles.So Tiles.Nine;
-    Tiles.Honor Tiles.East;
-    Tiles.Honor Tiles.Red
-  |] in
-  Array.iter (fun tile ->
-    let code = Tenhou_protocol.tenhou_tile_of_tile tile 0 in
-    Printf.printf "  %s -> code %d\n" (Tiles.string_of_tile tile) code
-  ) test_tiles;
-  
-  print_endline "\nTenhou protocol messages:";
-  Printf.printf "  Discard: %s\n" (Tenhou_protocol.encode_discard 45);
-  Printf.printf "  Riichi:  %s\n" (Tenhou_protocol.encode_reach 45);
-  Printf.printf "  Pass:    %s\n" (Tenhou_protocol.encode_noop ());
-  
+
   (* Show neural network interface *)
-  print_endline "\n=== Neural Network Interface ===\n";
+  print_endline "=== Neural Network Policy ===\n";
   print_endline "Training architecture:";
-  print_endline "  - OCaml: Game logic, Tenhou protocol, state management";
-  print_endline "  - MLX (Python): Neural network training on Apple Silicon";
-  print_endline "  - Communication: JSON via file or WebSocket\n";
-  
-  print_endline "Feature vector size: ~800+ dimensions";
+  print_endline "  - OCaml: Game logic, simulation, and simple NN policy";
+  print_endline "  - Policy: Random-initialized neural network";
+  print_endline "  - Future: MLX (Python) for advanced training on Apple Silicon\n";
+
+  print_endline "Feature vector size: ~600+ dimensions";
   print_endline "  - Hand encoding: 136 (one-hot)";
-  print_endline "  - Discards: 136 x 4 players = 544";
-  print_endline "  - Game state: ~50 features";
-  print_endline "  - Strategic hints: ~100 features\n";
-  
+  print_endline "  - Rivers: 136 x 2 (own + others) = 272";
+  print_endline "  - Game state: wind, rounds, points, riichi";
+  print_endline "  - Dora features\n";
+
   print_endline "=== Usage ===\n";
-  print_endline "Start web interface:";
-  print_endline "  python -m web.server --port 8080\n";
-  print_endline "Train with MLX:";
-  print_endline "  python -m mlx_training.train --games 10000 --mode 4p-half\n";
-  print_endline "Run simulation:";
-  print_endline "  ./mahjong --train --games 1000\n";
-  print_endline "Connect to Tenhou:";
-  print_endline "  ./mahjong --tenhou"
+  print_endline "Run demo game:";
+  print_endline "  ./mahjong --demo\n";
+  print_endline "Run simulation with NN policy:";
+  print_endline "  ./mahjong --train --games 1000"
 
 (** Run training simulation *)
 let run_training num_games =
   Printf.printf "=== Training Simulation ===\n\n";
-  Printf.printf "Running %d games...\n" num_games;
-  
-  let rules = Rules.default_four_player in
-  let config = { Training.default_config with num_games } in
-  
+  Printf.printf "Running %d games with neural network policy...\n" num_games;
+  Printf.printf "Hidden layer size: 128 neurons\n\n";
+
+  Random.self_init ();
+  let policy = Policy.create_nn_policy ~hidden_size:128 in
+  let policy_fn = Policy.policy_function policy in
+  let config = { Training.default_config with num_games; policy = policy_fn } in
+
   Training.train config;
-  
+
   print_endline "\nTraining complete!"
 
-(** Start web server info *)
-let start_web port =
-  Printf.printf "=== Web Server ===\n\n";
-  Printf.printf "To start the web server, run:\n";
-  Printf.printf "  python -m web.server --port %d\n\n" port;
-  Printf.printf "Then open http://localhost:%d in your browser.\n\n" port;
-  print_endline "Features:";
-  print_endline "  - Training progress visualization";
-  print_endline "  - Human vs AI gameplay";
-  print_endline "  - Tenhou bot control panel"
+(** Run demo game with pretty-print *)
+let run_demo () =
+  Printf.printf "=== Demo Game with Neural Network Policy ===\n\n";
+  Random.self_init ();
+  let seed = Array.init 17 (fun _ -> Random.bits ()) in
+  let rules = Rules.default_four_player in
 
-(** Start Tenhou bot *)
-let start_tenhou () =
-  print_endline "=== Tenhou Bot ===\n";
-  print_endline "Tenhou bot ready.";
-  print_endline "Configure username and auth_token in the code or via web interface.\n";
-  
-  let config = Tenhou_bot.default_config in
-  Printf.printf "Server: %s:%d\n" config.server config.port;
-  Printf.printf "Lobby: %d\n" config.lobby;
-  Printf.printf "Game type: %d\n\n" config.game_type;
-  
-  print_endline "Note: Actual connection requires network socket implementation."
+  Printf.printf "Starting 4-player half-game\n";
+  Printf.printf "Players: East, South, West, North\n";
+  Printf.printf "Starting points: %d each\n" rules.Rules.points.start_points;
+  Printf.printf "Policy: Random-initialized neural network (128 hidden neurons)\n\n";
+
+  (* Create NN policy *)
+  let policy = Policy.create_nn_policy ~hidden_size:128 in
+  let policy_fn = Policy.policy_function policy in
+
+  let final_state = Simulation.simulate_game rules seed policy_fn in
+
+  Printf.printf "Game complete!\n";
+  Printf.printf "Final scores:\n";
+  Array.iteri (fun _i player ->
+    let wind_name = match player.State.seat with
+      | State.East -> "East"
+      | State.South -> "South"
+      | State.West -> "West"
+      | State.North -> "North"
+    in
+    Printf.printf "  %s: %d points\n" wind_name player.State.points
+  ) final_state.State.players;
+
+  Printf.printf "\nTotal rounds played: %d\n" final_state.State.round.State.round_num;
+  Printf.printf "Game log entries: %d\n" (List.length final_state.State.game_log)
 
 let () =
-  let (mode, port, games) = parse_args () in
+  let (mode, _port, games) = parse_args () in
   match mode with
-  | "web" -> start_web port
   | "train" -> run_training games
-  | "tenhou" -> start_tenhou ()
+  | "demo" -> run_demo ()
   | _ -> show_info ()

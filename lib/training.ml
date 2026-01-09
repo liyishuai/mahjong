@@ -64,6 +64,7 @@ type training_config =
   ; num_threads : int  (** Number of parallel threads (for MacBook) *)
   ; checkpoint_interval : int  (** Save checkpoint every N games *)
   ; output_dir : string  (** Directory for saving results *)
+  ; policy : game_state -> action list -> action  (** Policy function for action selection *)
   }
 
 (** Training statistics *)
@@ -90,6 +91,7 @@ let default_config : training_config =
   ; num_threads = 4  (* Reasonable for MacBook *)
   ; checkpoint_interval = 1000
   ; output_dir = "training_output"
+  ; policy = random_action
   }
 
 (** Create empty feature vector *)
@@ -322,7 +324,7 @@ let train_epoch (config : training_config) : training_stats =
   
   for _ = 1 to config.num_games do
     let seed = Array.init 17 (fun _ -> Random.bits ()) in
-    let final_state = simulate_game config.rules seed random_action in
+    let final_state = simulate_game config.rules seed config.policy in
     incr total_rounds;
     
     (* Track scores *)
