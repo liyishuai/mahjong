@@ -79,11 +79,15 @@ type player_state = {
   mutable kyotaku : int;
   mutable oya : int;
   mutable scores : int array;
+  mutable tiles_left : int;
   (* Flags *)
   mutable riichi_declared : bool array;
   mutable riichi_accepted : bool array;
   mutable is_menzen : bool;
   mutable can_w_riichi : bool;
+  mutable is_w_riichi : bool;
+  mutable at_rinshan : bool;
+  mutable at_ippatsu : bool;
   (* Turn info *)
   mutable at_turn : int;
   (* Last action info *)
@@ -96,10 +100,18 @@ type player_state = {
   mutable pons : int list;
   mutable minkans : int list;
   mutable ankans : int list;
+  mutable ankan_candidates : int list;
+  mutable kakan_candidates : int list;
   (* Advanced state tracking *)
   mutable shanten : int;
   mutable waits : bool array;
   mutable at_furiten : bool;
+  mutable to_mark_same_cycle_furiten : bool;
+  mutable chankan_chance : bool;
+  mutable has_next_shanten_discard : bool;
+  mutable keep_shanten_discards : bool array;
+  mutable next_shanten_discards : bool array;
+  mutable forbidden_tiles : bool array;
   mutable tehai_len_div3 : int;
   mutable tiles_seen : int array;
   mutable discarded_tiles : bool array;
@@ -128,10 +140,14 @@ let create_player_state (player_id : int) : player_state =
     kyotaku = 0;
     oya = 0;
     scores = Array.make 4 25000;
+    tiles_left = 70;  (* Initial wall size *)
     riichi_declared = Array.make 4 false;
     riichi_accepted = Array.make 4 false;
     is_menzen = true;
     can_w_riichi = false;
+    is_w_riichi = false;
+    at_rinshan = false;
+    at_ippatsu = false;
     at_turn = 0;
     last_self_tsumo = None;
     last_kawa_tile = None;
@@ -141,10 +157,18 @@ let create_player_state (player_id : int) : player_state =
     pons = [];
     minkans = [];
     ankans = [];
+    ankan_candidates = [];
+    kakan_candidates = [];
     (* Advanced state tracking *)
     shanten = 8;  (* Max shanten *)
     waits = Array.make 34 false;
     at_furiten = false;
+    to_mark_same_cycle_furiten = false;
+    chankan_chance = false;
+    has_next_shanten_discard = false;
+    keep_shanten_discards = Array.make 34 false;
+    next_shanten_discards = Array.make 34 false;
+    forbidden_tiles = Array.make 34 false;
     tehai_len_div3 = 0;
     tiles_seen = Array.make 34 0;
     discarded_tiles = Array.make 34 false;
@@ -278,17 +302,29 @@ let start_kyoku (state : player_state)
   state.riichi_declared <- Array.make 4 false;
   state.riichi_accepted <- Array.make 4 false;
   state.is_menzen <- true;
+  state.is_w_riichi <- false;
+  state.at_rinshan <- false;
+  state.at_ippatsu <- false;
   state.last_self_tsumo <- None;
   state.kans_on_board <- 0;
   state.chis <- [];
   state.pons <- [];
   state.minkans <- [];
   state.ankans <- [];
+  state.ankan_candidates <- [];
+  state.kakan_candidates <- [];
+  state.tiles_left <- 70;
   (* Reset advanced tracking *)
   state.tehai_len_div3 <- Array.fold_left (+) 0 state.tehai / 3;
   state.shanten <- 8;
   state.waits <- Array.make 34 false;
   state.at_furiten <- false;
+  state.to_mark_same_cycle_furiten <- false;
+  state.chankan_chance <- false;
+  state.has_next_shanten_discard <- false;
+  state.keep_shanten_discards <- Array.make 34 false;
+  state.next_shanten_discards <- Array.make 34 false;
+  state.forbidden_tiles <- Array.make 34 false;
   state.tiles_seen <- Array.make 34 0;
   state.discarded_tiles <- Array.make 34 false;
   (* Reset dora tracking *)
@@ -369,9 +405,17 @@ let add_dora_indicator (state : player_state) (tile : int) : unit =
 
 (** Handle tsumo event *)
 let tsumo (state : player_state) (actor : int) (pai : int) : unit =
+  (* Clear kan candidates *)
+  state.ankan_candidates <- [];
+  state.kakan_candidates <- [];
+
   if actor = state.player_id then begin
     let idx = Tiles.deaka pai in
     if idx >= 0 && idx < 34 then begin
+      (* Decrement tiles left *)
+      if state.tiles_left > 0 then
+        state.tiles_left <- state.tiles_left - 1;
+
       state.tehai.(idx) <- state.tehai.(idx) + 1;
       state.last_self_tsumo <- Some pai;
       (* Update akas_in_hand tracking *)
@@ -383,17 +427,117 @@ let tsumo (state : player_state) (actor : int) (pai : int) : unit =
       (* Update advanced tracking after drawing *)
       state.tehai_len_div3 <- (Array.fold_left (+) 0 state.tehai) / 3;
       update_shanten state;
-      update_waits_and_furiten state
+      update_waits_and_furiten state;
+
+      (* Check for tsumo agari *)
+      state.last_cans <- { state.last_cans with can_discard = true };
+      if state.shanten = -1 then
+        state.last_cans <- { state.last_cans with can_tsumo_agari = true };
+
+      (* haitei tile (last tile) cannot be used for kan *)
+      if state.tiles_left > 0 then begin
+        (* Populate kan candidates if not in riichi or before riichi *)
+        if not state.riichi_accepted.(0) && state.kans_on_board < 4 then begin
+          (* Find ankan candidates (4 of a kind) *)
+          for tile_idx = 0 to 33 do
+            if state.tehai.(tile_idx) = 4 then begin
+              state.last_cans <- { state.last_cans with can_ankan = true };
+              state.ankan_candidates <- state.ankan_candidates @ [tile_idx]
+            end
+          done;
+
+          (* Find kakan candidates (have pon and 4th tile in hand) *)
+          List.iter (fun pon_tile ->
+            let pon_idx = Tiles.deaka pon_tile in
+            if pon_idx >= 0 && pon_idx < 34 && state.tehai.(pon_idx) > 0 then begin
+              state.last_cans <- { state.last_cans with can_kakan = true };
+              state.kakan_candidates <- state.kakan_candidates @ [pon_idx]
+            end
+          ) state.pons
+        end;
+
+        (* Check if can declare riichi *)
+        state.last_cans <- { state.last_cans with
+          can_riichi = state.is_menzen
+            && state.tiles_left >= 4
+            && state.scores.(0) >= 1000
+            && state.shanten = 0
+        }
+      end
     end
   end
 
+(** Check if chi is possible with a given tile *)
+let set_can_chi_from_tile (state : player_state) (tile : int) : unit =
+  let can_chi_low = ref false in
+  let can_chi_mid = ref false in
+  let can_chi_high = ref false in
+
+  let tile_id = Tiles.deaka tile in
+  if tile_id >= 0 && tile_id < 27 then begin  (* Chi only for numbered suits *)
+    let literal_num = tile_id mod 9 + 1 in  (* 1-9 *)
+
+    (* Check low chi: [tile, tile+1, tile+2] *)
+    if literal_num <= 7 && tile_id + 2 < 34 then begin
+      (* Check if we have the required tiles *)
+      if state.tehai.(tile_id + 1) > 0 && state.tehai.(tile_id + 2) > 0 then begin
+        (* Simulate removing the chi tiles from hand *)
+        let tehai_after = Array.copy state.tehai in
+        (* Set tile_id to 0 to prevent "cheating" - see Rust comment about 1111234 case *)
+        tehai_after.(tile_id) <- 0;
+        tehai_after.(tile_id + 1) <- tehai_after.(tile_id + 1) - 1;
+        tehai_after.(tile_id + 2) <- tehai_after.(tile_id + 2) - 1;
+        (* If literal_num < 7, also zero out tile_id + 3 to prevent using it for chi *)
+        if literal_num < 7 && tile_id + 3 < 34 then
+          tehai_after.(tile_id + 3) <- 0;
+        (* Chi is possible if there are still tiles in hand *)
+        can_chi_low := Array.fold_left (fun acc x -> if x > 0 then acc + 1 else acc) 0 tehai_after > 0
+      end
+    end;
+
+    (* Check mid chi: [tile-1, tile, tile+1] *)
+    if literal_num >= 2 && literal_num <= 8 && tile_id - 1 >= 0 && tile_id + 1 < 34 then begin
+      if state.tehai.(tile_id - 1) > 0 && state.tehai.(tile_id + 1) > 0 then begin
+        let tehai_after = Array.copy state.tehai in
+        (* Set tile_id to 0 to prevent "cheating" *)
+        tehai_after.(tile_id) <- 0;
+        tehai_after.(tile_id - 1) <- tehai_after.(tile_id - 1) - 1;
+        tehai_after.(tile_id + 1) <- tehai_after.(tile_id + 1) - 1;
+        can_chi_mid := Array.fold_left (fun acc x -> if x > 0 then acc + 1 else acc) 0 tehai_after > 0
+      end
+    end;
+
+    (* Check high chi: [tile-2, tile-1, tile] *)
+    if literal_num >= 3 && tile_id - 2 >= 0 then begin
+      if state.tehai.(tile_id - 2) > 0 && state.tehai.(tile_id - 1) > 0 then begin
+        let tehai_after = Array.copy state.tehai in
+        (* Set tile_id to 0 to prevent "cheating" *)
+        tehai_after.(tile_id) <- 0;
+        tehai_after.(tile_id - 2) <- tehai_after.(tile_id - 2) - 1;
+        tehai_after.(tile_id - 1) <- tehai_after.(tile_id - 1) - 1;
+        (* If literal_num > 3, also zero out tile_id - 3 *)
+        if literal_num > 3 && tile_id - 3 >= 0 then
+          tehai_after.(tile_id - 3) <- 0;
+        can_chi_high := Array.fold_left (fun acc x -> if x > 0 then acc + 1 else acc) 0 tehai_after > 0
+      end
+    end
+  end;
+
+  (* Update last_cans with new chi flags *)
+  state.last_cans <- { state.last_cans with
+    can_chi_low = !can_chi_low;
+    can_chi_mid = !can_chi_mid;
+    can_chi_high = !can_chi_high;
+  }
+
 (** Handle dahai (discard) event *)
 let dahai (state : player_state) (actor : int) (pai : int) (tsumogiri : bool) : unit =
+  state.last_kawa_tile <- Some pai;
+
   if actor = state.player_id then begin
     let idx = Tiles.deaka pai in
     if idx >= 0 && idx < 34 && state.tehai.(idx) > 0 then begin
       state.tehai.(idx) <- state.tehai.(idx) - 1;
-      state.last_kawa_tile <- Some pai;
       (* Update akas_in_hand tracking if discarding an aka *)
       (match pai with
        | t when t = Tiles.tile_id_5mr -> state.akas_in_hand.(0) <- false
@@ -404,10 +548,35 @@ let dahai (state : player_state) (actor : int) (pai : int) (tsumogiri : bool) : 
       state.discarded_tiles.(idx) <- true;
       if tsumogiri then
         state.last_self_tsumo <- None;
+      (* Reset flags after discard *)
+      state.at_rinshan <- false;
+      state.at_ippatsu <- false;
+      state.can_w_riichi <- false;
       (* Update advanced tracking after discarding *)
       state.tehai_len_div3 <- (Array.fold_left (+) 0 state.tehai) / 3;
       update_shanten state;
       update_waits_and_furiten state
+    end
+  end else begin
+    (* Another player discarded - check if we can react *)
+    if not state.riichi_accepted.(0) && state.tiles_left > 0 then begin
+      let idx = Tiles.deaka pai in
+      (* Check for chi (only from kamicha = actor + 1) *)
+      let relative_pos = (actor - state.player_id + 4) mod 4 in
+      if relative_pos = 3 && idx < 27 && state.tehai_len_div3 > 0 then
+        set_can_chi_from_tile state pai;
+
+      (* Check for pon *)
+      if idx >= 0 && idx < 34 then begin
+        state.last_cans <- { state.last_cans with
+          can_pon = state.tehai.(idx) >= 2;
+          can_daiminkan = (state.kans_on_board < 4 && state.tehai.(idx) = 3);
+        }
+      end;
+
+      (* Check for ron agari *)
+      if state.shanten = 0 && state.waits.(idx) && not state.at_furiten then
+        state.last_cans <- { state.last_cans with can_ron_agari = true }
     end
   end
 
@@ -528,68 +697,6 @@ let daiminkan (state : player_state) (actor : int) (pai : int) (consumed : int a
     update_waits_and_furiten state
   end
 
-(** Check if chi is possible with a given tile *)
-let set_can_chi_from_tile (state : player_state) (tile : int) : unit =
-  let can_chi_low = ref false in
-  let can_chi_mid = ref false in
-  let can_chi_high = ref false in
-
-  let tile_id = Tiles.deaka tile in
-  if tile_id >= 0 && tile_id < 27 then begin  (* Chi only for numbered suits *)
-    let literal_num = tile_id mod 9 + 1 in  (* 1-9 *)
-
-    (* Check low chi: [tile, tile+1, tile+2] *)
-    if literal_num <= 7 && tile_id + 2 < 34 then begin
-      (* Check if we have the required tiles *)
-      if state.tehai.(tile_id + 1) > 0 && state.tehai.(tile_id + 2) > 0 then begin
-        (* Simulate removing the chi tiles from hand *)
-        let tehai_after = Array.copy state.tehai in
-        (* Set tile_id to 0 to prevent "cheating" - see Rust comment about 1111234 case *)
-        tehai_after.(tile_id) <- 0;
-        tehai_after.(tile_id + 1) <- tehai_after.(tile_id + 1) - 1;
-        tehai_after.(tile_id + 2) <- tehai_after.(tile_id + 2) - 1;
-        (* If literal_num < 7, also zero out tile_id + 3 to prevent using it for chi *)
-        if literal_num < 7 && tile_id + 3 < 34 then
-          tehai_after.(tile_id + 3) <- 0;
-        (* Chi is possible if there are still tiles in hand *)
-        can_chi_low := Array.fold_left (fun acc x -> if x > 0 then acc + 1 else acc) 0 tehai_after > 0
-      end
-    end;
-
-    (* Check mid chi: [tile-1, tile, tile+1] *)
-    if literal_num >= 2 && literal_num <= 8 && tile_id - 1 >= 0 && tile_id + 1 < 34 then begin
-      if state.tehai.(tile_id - 1) > 0 && state.tehai.(tile_id + 1) > 0 then begin
-        let tehai_after = Array.copy state.tehai in
-        (* Set tile_id to 0 to prevent "cheating" *)
-        tehai_after.(tile_id) <- 0;
-        tehai_after.(tile_id - 1) <- tehai_after.(tile_id - 1) - 1;
-        tehai_after.(tile_id + 1) <- tehai_after.(tile_id + 1) - 1;
-        can_chi_mid := Array.fold_left (fun acc x -> if x > 0 then acc + 1 else acc) 0 tehai_after > 0
-      end
-    end;
-
-    (* Check high chi: [tile-2, tile-1, tile] *)
-    if literal_num >= 3 && tile_id - 2 >= 0 then begin
-      if state.tehai.(tile_id - 2) > 0 && state.tehai.(tile_id - 1) > 0 then begin
-        let tehai_after = Array.copy state.tehai in
-        (* Set tile_id to 0 to prevent "cheating" *)
-        tehai_after.(tile_id) <- 0;
-        tehai_after.(tile_id - 2) <- tehai_after.(tile_id - 2) - 1;
-        tehai_after.(tile_id - 1) <- tehai_after.(tile_id - 1) - 1;
-        (* If literal_num > 3, also zero out tile_id - 3 *)
-        if literal_num > 3 && tile_id - 3 >= 0 then
-          tehai_after.(tile_id - 3) <- 0;
-        can_chi_high := Array.fold_left (fun acc x -> if x > 0 then acc + 1 else acc) 0 tehai_after > 0
-      end
-    end
-  end;
-
-  (* Update last_cans with new chi flags *)
-  state.last_cans <- { state.last_cans with
-    can_chi_low = !can_chi_low;
-    can_chi_mid = !can_chi_mid;
-    can_chi_high = !can_chi_high;
-  }
 
 (** Main update function - process MJAI event and update state *)
 let update (state : player_state) (event : Mjai.event) : unit =
