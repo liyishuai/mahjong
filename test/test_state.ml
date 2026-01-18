@@ -343,19 +343,19 @@ let test_kakan_candidates () =
   let state = State.create_player_state 0 in
 
   (* Set up hand with a pon meld and the 4th tile *)
-  state.pons <- [| 0 |];  (* Pon of 1m *)
+  state.pons <- [ 0 ];  (* Pon of 1m *)
   state.tehai.(0) <- 1;   (* Have the 4th 1m in hand *)
 
   let candidates = State.kakan_candidates state in
 
-  Printf.printf "  Found %d kakan candidates\n" (Array.length candidates);
-  assert (Array.length candidates = 1);
-  assert (candidates.(0) = 0);
+  Printf.printf "  Found %d kakan candidates\n" (List.length candidates);
+  assert (List.length candidates = 1);
+  assert (List.hd candidates = 0);
 
   (* Test with no candidates *)
   state.tehai.(0) <- 0;
   let candidates = State.kakan_candidates state in
-  assert (Array.length candidates = 0);
+  assert (List.length candidates = 0);
 
   Printf.printf "  kakan_candidates tests passed\n"
 
@@ -541,8 +541,8 @@ let test_dora () =
 
   (* Test 1: Add dora indicator *)
   State.add_dora_indicator state 16;  (* 9p indicator, 1s is dora *)
-  assert (Array.length state.dora_indicators = 1);
-  assert (state.dora_indicators.(0) = 16);
+  assert (List.length state.dora_indicators = 1);
+  assert (List.hd state.dora_indicators = 16);
   assert (state.dora_factor.(17) = 1);  (* 1s (index 17) has dora factor 1 *)
 
   Printf.printf "  Test 1 passed: dora indicator added\n";
@@ -550,7 +550,7 @@ let test_dora () =
   (* Test 2: Multiple dora indicators *)
   State.add_dora_indicator state 0;   (* 1m indicator, 2m is dora *)
   State.add_dora_indicator state 9;   (* 1p indicator, 2p is dora *)
-  assert (Array.length state.dora_indicators = 3);
+  assert (List.length state.dora_indicators = 3);
   assert (state.dora_factor.(1) = 1);  (* 2m *)
   assert (state.dora_factor.(10) = 1);  (* 2p *)
 
@@ -563,7 +563,7 @@ let test_dora () =
   (* Reset and add indicators to count doras in hand *)
   Array.fill state.dora_factor 0 34 0;
   Array.fill state.doras_owned 0 4 0;
-  state.dora_indicators <- [||];
+  state.dora_indicators <- [];
 
   State.add_dora_indicator state 0;  (* 1m indicator, 2m is dora *)
   assert (state.dora_factor.(1) = 1);  (* 2m is dora *)

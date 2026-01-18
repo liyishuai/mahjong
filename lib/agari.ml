@@ -52,10 +52,10 @@ type agari_calculator = {
   jikaze : int;
   is_menzen : bool;
   is_ron : bool;
-  chis : int array;   (* Array of STARTING tiles for chi melds *)
-  pons : int array;   (* Array of tiles for pon melds *)
-  minkans : int array;  (* Array of tiles for minkan melds *)
-  ankans : int array;   (* Array of STARTING tiles for ankan melds *)
+  chis : int list;   (* List of STARTING tiles for chi melds *)
+  pons : int list;   (* List of tiles for pon melds *)
+  minkans : int list;  (* List of tiles for minkan melds *)
+  ankans : int list;   (* List of STARTING tiles for ankan melds *)
 }
 
 type div = {
@@ -371,7 +371,7 @@ let winning_tile_makes_minkou (calc : agari_calculator) (div : div)
 let check_pinfu (calc : agari_calculator) (div : div) (tile14 : int array) : bool =
   (* Must have 4 shuntsu and no shuntsu from open calls *)
   Array.length div.shuntsu_idxs = 4 &&
-  Array.length calc.chis = 0 &&
+  calc.chis = [] &&
   (* Pair must not be honors or winds *)
   let pair_tile = tile14.(div.pair_idx) in
   not (Tiles.is_jihai pair_tile) &&
@@ -404,17 +404,17 @@ let calc_fu_for_div (calc : agari_calculator) (div : div)
     ) (Array.map (fun idx -> tile14.(idx)) div.kotsu_idxs);
 
     (* Fu for open pons *)
-    Array.iter (fun k ->
+    List.iter (fun k ->
       if Tiles.is_yaokyuu k then fu := !fu + 4 else fu := !fu + 2
     ) calc.pons;
 
     (* Fu for ankans *)
-    Array.iter (fun k ->
+    List.iter (fun k ->
       if Tiles.is_yaokyuu k then fu := !fu + 32 else fu := !fu + 16
     ) calc.ankans;
 
     (* Fu for minkans *)
-    Array.iter (fun k ->
+    List.iter (fun k ->
       if Tiles.is_yaokyuu k then fu := !fu + 16 else fu := !fu + 8
     ) calc.minkans;
 
@@ -487,10 +487,10 @@ let check_agari (tiles34 : int array) : agari_result option =
         jikaze = 27; (* E - shouldn't match anything *)
         is_menzen = true;
         is_ron = true;
-        chis = [||];
-        pons = [||];
-        minkans = [||];
-        ankans = [||];
+        chis = [];
+        pons = [];
+        minkans = [];
+        ankans = [];
       } in
 
       (* Find best result across all divisions *)
@@ -572,11 +572,11 @@ let search_yakus (calc : agari_calculator) : agari_result option =
             han := !han + 1;
 
           (* All kotsu/kantsu *)
-          let all_kotsu_kantsu = Array.append menzen_kotsu
-            (Array.append calc.pons (Array.append calc.minkans calc.ankans)) in
+          let all_kotsu_kantsu = Array.to_list menzen_kotsu @
+            calc.pons @ calc.minkans @ calc.ankans in
 
           (* All shuntsu *)
-          let all_shuntsu = Array.append menzen_shuntsu calc.chis in
+          let all_shuntsu = Array.to_list menzen_shuntsu @ calc.chis in
 
           (* Check tanyao (all simples) *)
           let check_tanyao () =
@@ -588,8 +588,8 @@ let search_yakus (calc : agari_calculator) : agari_result option =
             if has_chitoi then
               Array.for_all is_simple tile14
             else
-              Array.for_all is_simple all_shuntsu &&
-              Array.for_all is_simple (Array.append all_kotsu_kantsu [|pair_tile|])
+              List.for_all is_simple all_shuntsu &&
+              List.for_all is_simple (all_kotsu_kantsu @ [pair_tile])
           in
 
           if check_tanyao () then
@@ -597,7 +597,7 @@ let search_yakus (calc : agari_calculator) : agari_result option =
 
           (* Check toitoi (all triplets) *)
           let has_toitoi = not has_chitoi &&
-            Array.length menzen_shuntsu = 0 && Array.length calc.chis = 0 in
+            Array.length menzen_shuntsu = 0 && calc.chis = [] in
           if has_toitoi then
             han := !han + 2;
 
@@ -606,7 +606,7 @@ let search_yakus (calc : agari_calculator) : agari_result option =
             if div.has_ipeikou && calc.is_menzen && not div.has_ryanpeikou then
               han := !han + 1
             (* Fallback check for iipeikou when ankans are present *)
-            else if Array.length calc.ankans > 0 && calc.is_menzen &&
+            else if calc.ankans <> [] && calc.is_menzen &&
                     Array.length menzen_shuntsu >= 2 then begin
               let shuntsu_marks = Array.make 3 0 in
               let has_ipeikou = Array.exists (fun t ->
@@ -630,10 +630,10 @@ let search_yakus (calc : agari_calculator) : agari_result option =
           if not has_chitoi then begin
             if calc.is_menzen && div.has_ittsuu then
               han := !han + 2
-            else if Array.length calc.chis = 0 && div.has_ittsuu then
+            else if calc.chis = [] && div.has_ittsuu then
               han := !han + 1
             (* Fallback check for ittsuu *)
-            else if Array.length menzen_shuntsu + Array.length calc.chis >= 3 then begin
+            else if Array.length menzen_shuntsu + List.length calc.chis >= 3 then begin
               let kinds = Array.make 3 0 in
               Array.iter (fun s ->
                 let kind = s / 9 in
@@ -643,7 +643,7 @@ let search_yakus (calc : agari_calculator) : agari_result option =
                 | 3 -> kinds.(kind) <- kinds.(kind) lor 0b010  (* 456 *)
                 | 6 -> kinds.(kind) <- kinds.(kind) lor 0b100  (* 789 *)
                 | _ -> ()
-              ) all_shuntsu;
+              ) (Array.of_list all_shuntsu);
               if Array.exists (fun k -> k = 0b111) kinds then
                 han := !han + 1
             end
@@ -666,8 +666,8 @@ let search_yakus (calc : agari_calculator) : agari_result option =
             if has_chitoi then
               Array.iter check_tile tile14
             else (
-              Array.iter check_tile all_shuntsu;
-              Array.iter check_tile all_kotsu_kantsu;
+              List.iter check_tile all_shuntsu;
+              List.iter check_tile all_kotsu_kantsu;
               check_tile pair_tile
             );
             (!kinds, !has_jihai, !is_single_kind)
@@ -684,9 +684,9 @@ let search_yakus (calc : agari_calculator) : agari_result option =
 
           (* Check sanshoku (three colors) *)
           let check_sanshoku_shuntsu () =
-            if Array.length all_shuntsu >= 3 then begin
+            if List.length all_shuntsu >= 3 then begin
               let counter = Array.make 9 0 in
-              Array.iter (fun s ->
+              List.iter (fun s ->
                 let kind = s / 9 in
                 let num = s mod 9 in
                 if kind < 3 && num < 9 then
@@ -698,7 +698,7 @@ let search_yakus (calc : agari_calculator) : agari_result option =
 
           let check_sanshoku_kotsu () =
             let counter = Array.make 9 0 in
-            Array.iter (fun k ->
+            List.iter (fun k ->
               let kind = k / 9 in
               let num = k mod 9 in
               if kind < 3 then
@@ -715,7 +715,7 @@ let search_yakus (calc : agari_calculator) : agari_result option =
           (* Check sanankou/suuankou - use winning_tile_makes_minkou *)
           let makes_minkou = winning_tile_makes_minkou calc div tile14 in
           let ankou_count = Array.length menzen_kotsu +
-            Array.length calc.ankans -
+            List.length calc.ankans -
             (if makes_minkou then 1 else 0) in
 
           (* Check suuankou (four concealed triplets) - yakuman *)
@@ -726,7 +726,7 @@ let search_yakus (calc : agari_calculator) : agari_result option =
             han := !han + 2;
 
           (* Check sankantsu/suukantsu *)
-          let kans_count = Array.length calc.ankans + Array.length calc.minkans in
+          let kans_count = List.length calc.ankans + List.length calc.minkans in
           if kans_count = 4 then
             yakuman := !yakuman + 1
           else if kans_count = 3 then
@@ -734,7 +734,7 @@ let search_yakus (calc : agari_calculator) : agari_result option =
 
           (* Check honor yaku (wind/dragon triplets) *)
           let has_jihai_triplets = Array.make 7 false in
-          Array.iter (fun k ->
+          List.iter (fun k ->
             if k >= 27 then has_jihai_triplets.(k - 27) <- true
           ) all_kotsu_kantsu;
 
@@ -778,23 +778,23 @@ let search_yakus (calc : agari_calculator) : agari_result option =
             if has_chitoi then
               Array.for_all check_yaokyuu tile14
             else
-              Array.for_all check_yaokyuu (Array.append all_kotsu_kantsu [|pair_tile|]) &&
-              (Array.length all_shuntsu = 0 ||
-               Array.for_all (fun s ->
+              List.for_all check_yaokyuu (all_kotsu_kantsu @ [pair_tile]) &&
+              (all_shuntsu = [] ||
+               List.for_all (fun s ->
                  let num = s mod 9 in
                  num = 0 || num = 6
                ) all_shuntsu)
           in
 
           if has_yaokyuu_everywhere then begin
-            let all_shuntsu_yaokyuu = Array.for_all (fun s ->
+            let all_shuntsu_yaokyuu = List.for_all (fun s ->
               let num = s mod 9 in
               num = 0 || num = 6
             ) all_shuntsu in
 
             (* Check if has honors *)
-            let has_any_jihai = Array.exists (fun k -> k >= 27)
-              (Array.append all_kotsu_kantsu [|pair_tile|]) in
+            let has_any_jihai = List.exists (fun k -> k >= 27)
+              (all_kotsu_kantsu @ [pair_tile]) in
 
             if has_chitoi || has_toitoi then begin
               if has_any_jihai then

@@ -38,10 +38,10 @@ type agari_calculator = {
   jikaze : int;  (** Seat wind: 0=E, 1=S, 2=W, 3=N *)
   is_menzen : bool;  (** True if fully concealed (menzen) *)
   is_ron : bool;  (** True if won by discard (false for tsumo) *)
-  chis : int array;  (** Chi melds (open sequences) *)
-  pons : int array;  (** Pon melds (open triplets) *)
-  minkans : int array;  (** Minkan melds (open quads) *)
-  ankans : int array;  (** Ankan melds (closed quads) *)
+  chis : int list;  (** Chi melds (open sequences) *)
+  pons : int list;  (** Pon melds (open triplets) *)
+  minkans : int list;  (** Minkan melds (open quads) *)
+  ankans : int list;  (** Ankan melds (closed quads) *)
 }
 
 (** [is_agari tiles34] checks if a hand is a winning hand.

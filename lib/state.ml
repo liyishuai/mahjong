@@ -92,10 +92,10 @@ type player_state = {
   mutable last_cans : action_candidate;
   (* Kan tracking *)
   mutable kans_on_board : int;
-  mutable chis : int array;
-  mutable pons : int array;
-  mutable minkans : int array;
-  mutable ankans : int array;
+  mutable chis : int list;
+  mutable pons : int list;
+  mutable minkans : int list;
+  mutable ankans : int list;
   (* Advanced state tracking *)
   mutable shanten : int;
   mutable waits : bool array;
@@ -104,7 +104,7 @@ type player_state = {
   mutable tiles_seen : int array;
   mutable discarded_tiles : bool array;
   (* Dora tracking *)
-  mutable dora_indicators : int array;  (* Array of dora indicator tiles *)
+  mutable dora_indicators : int list;  (* List of dora indicator tiles *)
   mutable dora_factor : int array;  (* Maps each tile to its dora count *)
   mutable doras_owned : int array;  (* Count of dora tiles in hand *)
   mutable doras_seen : int;  (* Total visible dora count *)
@@ -112,7 +112,7 @@ type player_state = {
   mutable akas_in_hand : bool array;  (* [5mr, 5pr, 5sr] presence in hand *)
   (* Meld overview (fuuro_overview) - tracks all melds with constituent tiles *)
   (* For each player (0-3), list of melds, each meld is a list of tiles *)
-  mutable fuuro_overview : int array array array;  (* [player][meld][tile] *)
+  mutable fuuro_overview : int list list array;  (* [player][meld][tile] *)
 }
 
 (** Create initial player state *)
@@ -137,10 +137,10 @@ let create_player_state (player_id : int) : player_state =
     last_kawa_tile = None;
     last_cans = default_action_candidate;
     kans_on_board = 0;
-    chis = [||];
-    pons = [||];
-    minkans = [||];
-    ankans = [||];
+    chis = [];
+    pons = [];
+    minkans = [];
+    ankans = [];
     (* Advanced state tracking *)
     shanten = 8;  (* Max shanten *)
     waits = Array.make 34 false;
@@ -149,14 +149,14 @@ let create_player_state (player_id : int) : player_state =
     tiles_seen = Array.make 34 0;
     discarded_tiles = Array.make 34 false;
     (* Dora tracking *)
-    dora_indicators = [||];
+    dora_indicators = [];
     dora_factor = Array.make 34 0;
     doras_owned = Array.make 4 0;
     doras_seen = 0;
     (* Red tile tracking *)
     akas_in_hand = [|false; false; false|];
     (* Meld overview - 4 players, each with empty meld list *)
-    fuuro_overview = [|[||]; [||]; [||]; [||]|];
+    fuuro_overview = [|[]; []; []; []|];
   }
 
 (** Validate if a tile is in hand *)
@@ -280,10 +280,10 @@ let start_kyoku (state : player_state)
   state.is_menzen <- true;
   state.last_self_tsumo <- None;
   state.kans_on_board <- 0;
-  state.chis <- [||];
-  state.pons <- [||];
-  state.minkans <- [||];
-  state.ankans <- [||];
+  state.chis <- [];
+  state.pons <- [];
+  state.minkans <- [];
+  state.ankans <- [];
   (* Reset advanced tracking *)
   state.tehai_len_div3 <- Array.fold_left (+) 0 state.tehai / 3;
   state.shanten <- 8;
@@ -292,14 +292,14 @@ let start_kyoku (state : player_state)
   state.tiles_seen <- Array.make 34 0;
   state.discarded_tiles <- Array.make 34 false;
   (* Reset dora tracking *)
-  state.dora_indicators <- [||];
+  state.dora_indicators <- [];
   Array.fill state.dora_factor 0 34 0;
   Array.fill state.doras_owned 0 4 0;
   state.doras_seen <- 0;
   (* Reset red tile tracking *)
   state.akas_in_hand <- [|false; false; false|];
   (* Reset meld overview *)
-  state.fuuro_overview <- [|[||]; [||]; [||]; [||]|]
+  state.fuuro_overview <- [|[]; []; []; []|]
 
 (** Update shanten for current hand *)
 let update_shanten (state : player_state) : unit =
@@ -349,8 +349,8 @@ let real_time_shanten (state : player_state) : int =
 let add_dora_indicator (state : player_state) (tile : int) : unit =
   let tile_idx = Tiles.deaka tile in
   if tile_idx >= 0 && tile_idx < 34 then begin
-    (* Add to indicators array *)
-    state.dora_indicators <- Array.append state.dora_indicators [|tile|];
+    (* Add to indicators list *)
+    state.dora_indicators <- state.dora_indicators @ [tile];
 
     (* Get the dora tile (next tile after indicator) *)
     let dora_tile = Tiles.next tile in
@@ -421,13 +421,13 @@ let chi (state : player_state) (actor : int) (pai : int) (consumed : int array) 
         state.tehai.(idx) <- state.tehai.(idx) - 1
     ) consumed;
     (* Add chi to state *)
-    state.chis <- Array.append state.chis [|pai|];
+    state.chis <- state.chis @ [pai];
     state.is_menzen <- false;
     (* Update fuuro_overview with the complete meld (including called tile) *)
     (* consumed contains 2 tiles from hand, pai is the called tile *)
-    let meld_tiles = Array.append consumed [|pai|] in
+    let meld_tiles = Array.to_list consumed @ [pai] in
     state.fuuro_overview.(state.player_id) <-
-      Array.append state.fuuro_overview.(state.player_id) [|meld_tiles|]
+      state.fuuro_overview.(state.player_id) @ [meld_tiles]
   end
 
 (** Handle pon (triplet meld) event *)
@@ -440,13 +440,13 @@ let pon (state : player_state) (actor : int) (pai : int) (consumed : int array) 
         state.tehai.(idx) <- state.tehai.(idx) - 1
     ) consumed;
     (* Add pon to state *)
-    state.pons <- Array.append state.pons [|pai|];
+    state.pons <- state.pons @ [pai];
     state.is_menzen <- false;
     (* Update fuuro_overview with the complete meld *)
     (* consumed contains 2 tiles from hand, pai is the called tile *)
-    let meld_tiles = Array.append consumed [|pai|] in
+    let meld_tiles = Array.to_list consumed @ [pai] in
     state.fuuro_overview.(state.player_id) <-
-      Array.append state.fuuro_overview.(state.player_id) [|meld_tiles|]
+      state.fuuro_overview.(state.player_id) @ [meld_tiles]
   end
 
 (** Handle reach (riichi) declaration *)
@@ -457,6 +457,76 @@ let reach (state : player_state) (actor : int) : unit =
 (** Handle reach_accepted *)
 let reach_accepted (state : player_state) (actor : int) : unit =
   state.riichi_accepted.(actor) <- true
+
+(** Handle ankan (closed kan from hand) *)
+let ankan (state : player_state) (actor : int) (consumed : int array) : unit =
+  if actor = state.player_id then begin
+    let tile = Tiles.deaka consumed.(0) in
+    (* Remove 4 tiles from hand *)
+    Array.iter (fun t ->
+      let idx = Tiles.deaka t in
+      if idx >= 0 && idx < 34 && state.tehai.(idx) > 0 then
+        state.tehai.(idx) <- state.tehai.(idx) - 1
+    ) consumed;
+    (* Add to ankans list *)
+    state.ankans <- state.ankans @ [tile];
+    state.kans_on_board <- state.kans_on_board + 1;
+    state.tehai_len_div3 <- state.tehai_len_div3 - 1;
+    (* Update tracking *)
+    update_shanten state;
+    update_waits_and_furiten state
+  end
+
+(** Handle kakan (pon → kan) *)
+let kakan (state : player_state) (actor : int) (pai : int) : unit =
+  if actor = state.player_id then begin
+    let tile_idx = Tiles.deaka pai in
+    (* Remove tile from hand *)
+    if tile_idx >= 0 && tile_idx < 34 && state.tehai.(tile_idx) > 0 then begin
+      state.tehai.(tile_idx) <- state.tehai.(tile_idx) - 1;
+      (* Remove from pons, add to minkans *)
+      state.pons <- List.filter (fun t -> Tiles.deaka t <> tile_idx) state.pons;
+      state.minkans <- state.minkans @ [tile_idx];
+      state.kans_on_board <- state.kans_on_board + 1;
+      (* Update fuuro_overview: add tile to existing pon meld *)
+      let player_fuuro = state.fuuro_overview.(state.player_id) in
+      let updated_fuuro =
+        List.map (fun meld ->
+          match meld with
+          | hd :: _ when Tiles.deaka hd = tile_idx -> meld @ [pai]
+          | _ -> meld
+        ) player_fuuro
+      in
+      state.fuuro_overview.(state.player_id) <- updated_fuuro;
+      (* Update tracking *)
+      update_shanten state;
+      update_waits_and_furiten state
+    end
+  end
+
+(** Handle daiminkan (closed kan → open kan) *)
+let daiminkan (state : player_state) (actor : int) (pai : int) (consumed : int array) : unit =
+  if actor = state.player_id then begin
+    (* Remove 3 tiles from hand *)
+    Array.iter (fun tile ->
+      let idx = Tiles.deaka tile in
+      if idx >= 0 && idx < 34 && state.tehai.(idx) > 0 then
+        state.tehai.(idx) <- state.tehai.(idx) - 1
+    ) consumed;
+    (* Add to minkans *)
+    let tile_idx = Tiles.deaka pai in
+    state.minkans <- state.minkans @ [tile_idx];
+    state.kans_on_board <- state.kans_on_board + 1;
+    state.is_menzen <- false;
+    state.tehai_len_div3 <- state.tehai_len_div3 - 1;
+    (* Update fuuro_overview *)
+    let meld_tiles = Array.to_list consumed @ [pai] in
+    state.fuuro_overview.(state.player_id) <-
+      state.fuuro_overview.(state.player_id) @ [meld_tiles];
+    (* Update tracking *)
+    update_shanten state;
+    update_waits_and_furiten state
+  end
 
 (** Check if chi is possible with a given tile *)
 let set_can_chi_from_tile (state : player_state) (tile : int) : unit =
@@ -595,9 +665,17 @@ let update (state : player_state) (event : Mjai.event) : unit =
     | Mjai.End_kyoku | Mjai.End_game | Mjai.None ->
         default_action_candidate
 
-    | Mjai.Daiminkan _ | Mjai.Kakan _ | Mjai.Ankan _ ->
-        (* Not fully implemented yet *)
-        default_action_candidate
+    | Mjai.Ankan { actor; consumed } ->
+        ankan state actor consumed;
+        { default_action_candidate with target_actor = actor }
+
+    | Mjai.Kakan { actor; pai; consumed=_ } ->
+        kakan state actor pai;
+        { default_action_candidate with target_actor = actor }
+
+    | Mjai.Daiminkan { actor; target=_; pai; consumed } ->
+        daiminkan state actor pai consumed;
+        { default_action_candidate with target_actor = actor }
   in
 
   (* Update last_cans in state *)
@@ -650,16 +728,16 @@ let last_cans (state : player_state) : action_candidate =
   state.last_cans
 
 (** Get chi melds *)
-let chis (state : player_state) : int array = state.chis
+let chis (state : player_state) : int list = state.chis
 
 (** Get pon melds *)
-let pons (state : player_state) : int array = state.pons
+let pons (state : player_state) : int list = state.pons
 
 (** Get open kans (minkans) *)
-let minkans (state : player_state) : int array = state.minkans
+let minkans (state : player_state) : int list = state.minkans
 
 (** Get closed kans (ankans) *)
-let ankans (state : player_state) : int array = state.ankans
+let ankans (state : player_state) : int list = state.ankans
 
 (** Get current turn count *)
 let at_turn (state : player_state) : int = state.at_turn
@@ -684,16 +762,15 @@ let ankan_candidates (state : player_state) : int array =
   Array.of_list (List.rev !candidates)
 
 (** Get candidates for kakan (open kan -> closed kan) *)
-let kakan_candidates (state : player_state) : int array =
+let kakan_candidates (state : player_state) : int list =
   (* Find pon melds where we have the 4th tile in hand *)
-  let candidates = ref [] in
-  Array.iter (fun pon_tile ->
+  List.filter_map (fun pon_tile ->
     let pon_idx = Tiles.deaka pon_tile in
-    if pon_idx >= 0 && pon_idx < 34 then
-      if state.tehai.(pon_idx) > 0 then
-        candidates := pon_idx :: !candidates
-  ) state.pons;
-  Array.of_list (List.rev !candidates)
+    if pon_idx >= 0 && pon_idx < 34 && state.tehai.(pon_idx) > 0 then
+      Some pon_idx
+    else
+      None
+  ) state.pons
 
 (** Get tiles seen count (for furiten calculation) *)
 let tiles_seen (state : player_state) : int array = state.tiles_seen
@@ -702,7 +779,7 @@ let tiles_seen (state : player_state) : int array = state.tiles_seen
 let discarded_tiles (state : player_state) : bool array = state.discarded_tiles
 
 (** Get dora indicator tiles *)
-let dora_indicators (state : player_state) : int array = state.dora_indicators
+let dora_indicators (state : player_state) : int list = state.dora_indicators
 
 (** Get dora factor array (maps each tile to its dora count) *)
 let dora_factor (state : player_state) : int array = state.dora_factor
@@ -718,5 +795,5 @@ let akas_in_hand (state : player_state) : bool array = state.akas_in_hand
 
 (** Get fuuro overview - all melds for all players with constituent tiles *)
 (* Returns: [player_id][meld_index][tile_index] *)
-let fuuro_overview (state : player_state) : int array array array =
+let fuuro_overview (state : player_state) : int list list array =
   state.fuuro_overview
