@@ -433,7 +433,28 @@ let add_dora_indicator (state : player_state) (tile : int) : unit =
       (* Count dora tiles in hand *)
       state.doras_owned.(0) <- state.doras_owned.(0) + state.tehai.(dora_idx);
 
-      (* TODO: Count dora tiles in melds - requires fuuro_overview *)
+      (* Count dora tiles in melds (fuuro_overview) *)
+      List.iter (fun meld ->
+        List.iter (fun tile ->
+          (* Count based on dora_factor *)
+          let tile_dora_idx = Tiles.deaka tile in
+          state.doras_owned.(0) <- state.doras_owned.(0) + state.dora_factor.(tile_dora_idx);
+          (* Count aka tiles as additional dora *)
+          if Tiles.is_aka tile then
+            state.doras_owned.(0) <- state.doras_owned.(0) + 1
+        ) meld
+      ) state.fuuro_overview.(state.player_id);
+
+      (* Count dora tiles in ankans *)
+      (* Note: ankans list contains deaka'd tiles, each represents 4 tiles *)
+      List.iter (fun ankan_tile ->
+        if ankan_tile = dora_idx then begin
+          state.doras_owned.(0) <- state.doras_owned.(0) + 4;
+          (* Check if it's a 5 (could have been aka) *)
+          if ankan_tile mod 9 = 4 && ankan_tile < 27 then
+            state.doras_owned.(0) <- state.doras_owned.(0) + 1  (* Assume one aka *)
+        end
+      ) state.ankans
     end
   end
 
