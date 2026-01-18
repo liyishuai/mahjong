@@ -433,14 +433,12 @@ let add_dora_indicator (state : player_state) (tile : int) : unit =
       (* Count dora tiles in hand *)
       state.doras_owned.(0) <- state.doras_owned.(0) + state.tehai.(dora_idx);
 
-      (* Count dora tiles in melds (fuuro_overview) *)
+      (* Count NEW dora tiles in melds (fuuro_overview) *)
+      (* Only count tiles that match the new dora *)
       List.iter (fun meld ->
         List.iter (fun tile ->
-          (* Count based on dora_factor *)
-          let tile_dora_idx = Tiles.deaka tile in
-          state.doras_owned.(0) <- state.doras_owned.(0) + state.dora_factor.(tile_dora_idx);
-          (* Count aka tiles as additional dora *)
-          if Tiles.is_aka tile then
+          let tile_idx = Tiles.deaka tile in
+          if tile_idx = dora_idx then
             state.doras_owned.(0) <- state.doras_owned.(0) + 1
         ) meld
       ) state.fuuro_overview.(state.player_id);
@@ -479,6 +477,10 @@ let tsumo (state : player_state) (actor : int) (pai : int) : unit =
        | t when t = Tiles.tile_id_5pr -> state.akas_in_hand.(1) <- true
        | t when t = Tiles.tile_id_5sr -> state.akas_in_hand.(2) <- true
        | _ -> ());
+      (* Update doras_owned for the drawn tile *)
+      state.doras_owned.(0) <- state.doras_owned.(0) + state.dora_factor.(idx);
+      if Tiles.is_aka pai then
+        state.doras_owned.(0) <- state.doras_owned.(0) + 1;
       (* Update advanced tracking after drawing *)
       state.tehai_len_div3 <- (Array.fold_left (+) 0 state.tehai) / 3;
       update_shanten state;
@@ -599,6 +601,10 @@ let dahai (state : player_state) (actor : int) (pai : int) (tsumogiri : bool) : 
        | t when t = Tiles.tile_id_5pr -> state.akas_in_hand.(1) <- false
        | t when t = Tiles.tile_id_5sr -> state.akas_in_hand.(2) <- false
        | _ -> ());
+      (* Update doras_owned for the discarded tile *)
+      state.doras_owned.(0) <- state.doras_owned.(0) - state.dora_factor.(idx);
+      if Tiles.is_aka pai then
+        state.doras_owned.(0) <- state.doras_owned.(0) - 1;
       (* Track discarded tiles for furiten calculation *)
       state.discarded_tiles.(idx) <- true;
       if tsumogiri then
@@ -936,6 +942,28 @@ let kakan_candidates (state : player_state) : int list =
 
 (** Get tiles seen count (for furiten calculation) *)
 let tiles_seen (state : player_state) : int array = state.tiles_seen
+
+(** Calculate player's rank given current scores.
+    @param state The player state
+    @param scores_rel Relative scores from player's perspective [25000; 25000; 25000; 25000]
+    @return Rank (0 = 1st, 1 = 2nd, 2 = 3rd, 3 = 4th) *)
+let get_rank (state : player_state) (scores_rel : int array) : int =
+  (* Rotate scores to absolute positions *)
+  let scores_abs = Array.copy scores_rel in
+  Array.blit scores_rel (4 - state.player_id) scores_abs 0 state.player_id;
+  Array.blit scores_rel 0 scores_abs state.player_id (4 - state.player_id);
+
+  (* Create player_by_rank: stable sort players by score (descending) *)
+  let player_by_rank = [|0; 1; 2; 3|] in
+  Array.stable_sort (fun a b -> compare scores_abs.(b) scores_abs.(a)) player_by_rank;
+
+  (* Find rank of current player *)
+  let rank = ref 0 in
+  for i = 0 to 3 do
+    if player_by_rank.(i) = state.player_id then
+      rank := i
+  done;
+  !rank
 
 (** Get discarded tiles flags *)
 let discarded_tiles (state : player_state) : bool array = state.discarded_tiles

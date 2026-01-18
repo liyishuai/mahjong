@@ -640,6 +640,137 @@ let test_aka_tracking () =
 
   Printf.printf "  aka tracking tests passed\n"
 
+(** Test get_rank function *)
+let test_get_rank () =
+  Printf.printf "Testing get_rank...\n";
+
+  (* Test 1: Player 0 with lowest score *)
+  Printf.printf "  Test 1: Player 0 with lowest score...\n";
+  let state = State.create_player_state 0 in
+  let rank = State.get_rank state [|20000; 25000; 25000; 30000|] in
+  assert (rank = 3);  (* 4th place *)
+  Printf.printf "  Test 1 passed: rank = %d\n" rank;
+
+  (* Test 2: All tied - position-based tiebreaker *)
+  Printf.printf "  Test 2: All tied scores...\n";
+  let state = State.create_player_state 3 in
+  let rank = State.get_rank state [|25000; 25000; 25000; 25000|] in
+  assert (rank = 3);  (* Last position *)
+  Printf.printf "  Test 2 passed: rank = %d\n" rank;
+
+  (* Test 3: Player 1 with 2nd highest *)
+  Printf.printf "  Test 3: Player 1 with 2nd highest...\n";
+  let state = State.create_player_state 1 in
+  let rank = State.get_rank state [|25000; 30000; 20000; 25000|] in
+  assert (rank = 2);  (* 3rd place (0-indexed), but player 1 has 30000 which is 1st *)
+  Printf.printf "  Test 3 passed: rank = %d\n" rank;
+
+  (* Test 4: Tie-breaking by position *)
+  Printf.printf "  Test 4: Tie-breaking by position...\n";
+  let state = State.create_player_state 1 in
+  let rank = State.get_rank state [|32000; 32000; 18000; 18000|] in
+  assert (rank = 0);  (* Player 1 with 32000 gets 1st due to position *)
+  Printf.printf "  Test 4 passed: rank = %d\n" rank;
+
+  (* Test 5: Tie-breaking example 2 *)
+  Printf.printf "  Test 5: Tie-breaking with different positions...\n";
+  let state = State.create_player_state 2 in
+  let rank = State.get_rank state [|32000; 18000; 18000; 32000|] in
+  assert (rank = 1);  (* Player 2 with 18000 is worse than player 3 with 18000 *)
+  Printf.printf "  Test 5 passed: rank = %d\n" rank;
+
+  (* Test 6: Low score tie-breaking *)
+  Printf.printf "  Test 6: Low score tie-breaking...\n";
+  let state = State.create_player_state 2 in
+  let rank = State.get_rank state [|5; 2; 5; 3|] in
+  assert (rank = 1);  (* Player 2 with 5 gets 2nd (0=1st, 2=2nd) *)
+  Printf.printf "  Test 6 passed: rank = %d\n" rank;
+
+  Printf.printf "  get_rank tests passed\n"
+
+(** Test dora counting after kan *)
+let test_dora_count_after_kan () =
+  Printf.printf "Testing dora_count_after_kan...\n";
+
+  (* Start kyoku with hand: 1111s 123456p 112z *)
+  let state = State.create_player_state 0 in
+  let unknown_hand = Array.make 13 Tiles.tile_id_unknown in
+  let tehais = [|
+    (* Player 0: 1111s 123456p 112z (using tile IDs) *)
+    Hand.hand_with_aka "1111s 123456p 112z" |> Result.get_ok |> Hand.tile37_to_array;
+    unknown_hand;
+    unknown_hand;
+    unknown_hand;
+  |] in
+  let event = Mjai.Start_kyoku {
+    bakaze = 27;  (* E *)
+    dora_marker = 30;  (* N, making E (27) the dora *)
+    kyoku = 1;
+    honba = 0;
+    kyotaku = 0;
+    oya = 0;
+    scores = [|25000; 25000; 25000; 25000|];
+    tehais;
+  } in
+  State.update state event;
+
+  (* Tsumo 8s *)
+  State.update state (Mjai.Tsumo { actor = 0; pai = 25 });  (* 8s *)
+  Printf.printf "  Initial doras_owned: %d (expected 2)\n" state.doras_owned.(0);
+  assert (state.doras_owned.(0) = 2);  (* Should have 2 dora initially *)
+
+  (* Ankan 1s (consume four 1s tiles) *)
+  State.update state (Mjai.Ankan { actor = 0; consumed = [|18; 18; 18; 18|] });  (* 1s *)
+
+  (* Add dora indicator 9s *)
+  State.update state (Mjai.Dora { dora_marker = 26 });  (* 9s *)
+
+  (* Tsumo 5pr (red 5p) *)
+  State.update state (Mjai.Tsumo { actor = 0; pai = Tiles.tile_id_5pr });
+  Printf.printf "  After ankan and dora: doras_owned = %d (expected 7)\n" state.doras_owned.(0);
+  assert (state.doras_owned.(0) = 7);  (* Should have 7 dora after kan *)
+
+  (* Dahai E *)
+  State.update state (Mjai.Dahai { actor = 0; pai = 27; tsumogiri = true });  (* E *)
+  assert (state.doras_owned.(0) = 6);  (* Lost 1 dora *)
+  Printf.printf "  After dahai E: doras_owned = %d\n" state.doras_owned.(0);
+
+  (* Other players' turns *)
+  State.update state (Mjai.Tsumo { actor = 1; pai = 0 });
+  State.update state (Mjai.Dahai { actor = 1; pai = 13; tsumogiri = true });  (* 5p *)
+
+  (* Pon 5p *)
+  State.update state (Mjai.Pon {
+    actor = 0;
+    target = 1;
+    pai = 13;  (* 5p *)
+    consumed = [|Tiles.tile_id_5pr; 13|]  (* 5pr, 5p *)
+  });
+  assert (state.doras_owned.(0) = 6);  (* Still 6 dora *)
+  Printf.printf "  After pon 5p: doras_owned = %d\n" state.doras_owned.(0);
+
+  (* Dahai E *)
+  State.update state (Mjai.Dahai { actor = 0; pai = 27; tsumogiri = false });  (* E *)
+  assert (state.doras_owned.(0) = 5);  (* Lost 1 dora *)
+  Printf.printf "  After second dahai E: doras_owned = %d\n" state.doras_owned.(0);
+
+  (* Continue with other players' turns to set up ankan by player 3 *)
+  State.update state (Mjai.Tsumo { actor = 1; pai = 0 });
+  State.update state (Mjai.Dahai { actor = 1; pai = 31; tsumogiri = true });  (* P *)
+  State.update state (Mjai.Tsumo { actor = 2; pai = 0 });
+  State.update state (Mjai.Dahai { actor = 2; pai = 31; tsumogiri = true });  (* P *)
+
+  (* Player 3 ankan *)
+  State.update state (Mjai.Tsumo { actor = 3; pai = 0 });
+  State.update state (Mjai.Ankan { actor = 3; consumed = [|0; 0; 0; 0|] });  (* 1m *)
+  State.update state (Mjai.Dora { dora_marker = 12 });  (* 4p *)
+
+  (* Dora count should increase because 4p dora indicator makes 5p a dora *)
+  Printf.printf "  After opponent ankan: doras_owned = %d (expected 8)\n" state.doras_owned.(0);
+  assert (state.doras_owned.(0) = 8);  (* Gained 3 dora from having 3x 5p *)
+
+  Printf.printf "  dora_count_after_kan tests passed\n"
+
 let () =
   Printf.printf "\nState Module Tests\n";
   Printf.printf "==================\n\n";
@@ -660,6 +791,8 @@ let () =
   test_furiten ();
   test_dora ();
   test_aka_tracking ();
+  test_get_rank ();
+  test_dora_count_after_kan ();
   Printf.printf "\n==================\n";
   Printf.printf "All State Tests Passed!\n";
   Printf.printf "==================\n\n"

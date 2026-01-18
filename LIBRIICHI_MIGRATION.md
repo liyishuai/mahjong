@@ -53,15 +53,15 @@ Total                       ███▊  29% | 3,830/13,408 lines
    - Daiminkan (closed kan → open kan) - Update minkans, kans_on_board
    - Dora events - Already have add_dora_indicator, integrate properly
 
-2. **ML Observation Encoding** (from `state/obs_repr.rs`)
-   - Encode state to numpy arrays for ML input
-   - Version-dependent encoding support
-
-3. **Complex Test Scenarios**
+2. **Complex Test Scenarios**
    - Furiten: riichi furiten, permanent furiten after discard
    - Dora counting: after kan calls, in melds
    - Rule-based agari: all last, minogashi situations
    - Double chankan, kakan from hand, chi at 0 shanten
+
+3. **ML Observation Encoding** (from `state/obs_repr.rs`)
+   - Encode state to numpy arrays for ML input
+   - Version-dependent encoding support
 
 ### Future: Phase 4-8 (Optional)
 
