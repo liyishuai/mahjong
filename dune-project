@@ -16,6 +16,9 @@
 (package
  (name mahjong)
  (synopsis "Mahjong library for OCaml")
- (depends ocaml dune))
+ (depends
+  (ocaml (>= 5.0))
+  dune
+  (domainslib (>= 0.5.0))))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

@@ -1,3 +1,23 @@
 (test
- (name test_mahjong)
+ (name test_tiles)
+ (libraries mahjong.lib))
+
+(test
+ (name test_hand)
+ (libraries mahjong.lib))
+
+(test
+ (name test_shanten)
+ (libraries mahjong.lib))
+
+(test
+ (name test_agari)
+ (libraries mahjong.lib))
+
+(test
+ (name test_mjai)
+ (libraries mahjong.lib))
+
+(test
+ (name test_state)
  (libraries mahjong.lib))

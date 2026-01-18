@@ -1,3 +1,30 @@
 (library
  (name mahjong)
- (public_name mahjong.lib))
+ (public_name mahjong.lib)
+ (wrapped false)
+ (modules tiles hand point agari shanten mjai state)
+ (libraries yojson))
+
+(executable
+ (name agari_generator)
+ (public_name agari_generator)
+ (modules agari_generator)
+ (libraries mahjong))
+
+(executable
+ (name shanten_generator)
+ (public_name shanten_generator)
+ (modules shanten_generator)
+ (libraries mahjong domainslib processor))
+
+(rule
+ (target agari.bin)
+ (deps agari_generator.exe)
+ (action
+  (run %{deps})))
+
+(rule
+ (targets index_s.bin index_h.bin)
+ (deps shanten_generator.exe)
+ (action
+  (run %{deps})))

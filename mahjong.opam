@@ -7,8 +7,9 @@ license: "MPL-2.0"
 homepage: "https://github.com/liyishuai/mahjong"
 bug-reports: "https://github.com/liyishuai/mahjong/issues"
 depends: [
-  "ocaml"
+  "ocaml" {>= "5.0"}
   "dune" {>= "3.13"}
+  "domainslib" {>= "0.5.0"}
   "odoc" {with-doc}
 ]
 build: [
