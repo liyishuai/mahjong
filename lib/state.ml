@@ -191,6 +191,28 @@ let tile_in_hand (state : player_state) (tile : int) : bool =
   else
     false
 
+(** Ensure tiles are in hand, including aka validation *)
+let ensure_tiles_in_hand (state : player_state) (tiles : int array) : (unit, string) result =
+  try
+    Array.iter (fun tile ->
+      let tile_idx = Tiles.deaka tile in
+      if tile_idx < 0 || tile_idx >= 34 || state.tehai.(tile_idx) = 0 then
+        failwith (Printf.sprintf "tile %d is not in hand" tile);
+      (* Check aka tiles specifically *)
+      if Tiles.is_aka tile then begin
+        let aka_idx = match tile with
+          | t when t = Tiles.tile_id_5mr -> 0
+          | t when t = Tiles.tile_id_5pr -> 1
+          | t when t = Tiles.tile_id_5sr -> 2
+          | _ -> -1
+        in
+        if aka_idx >= 0 && not state.akas_in_hand.(aka_idx) then
+          failwith (Printf.sprintf "aka tile %d is not in hand" tile)
+      end
+    ) tiles;
+    Ok ()
+  with Failure msg -> Error msg
+
 (** Validate reaction to current state *)
 let validate_reaction (state : player_state) (action : Mjai.event) : (unit, string) result =
   let cans = state.last_cans in
@@ -232,43 +254,55 @@ let validate_reaction (state : player_state) (action : Mjai.event) : (unit, stri
           if cans.can_riichi then Ok ()
           else Error "cannot riichi"
 
-      | Mjai.Chi { actor; target; _ } ->
+      | Mjai.Chi { actor; target; pai; consumed } ->
           if (target + 1) mod 4 <> actor then
             Error "chi from non-kamicha"
           else if not (can_chi cans) then
             Error "cannot chi"
-          else
-            Ok ()
+          else (match state.last_kawa_tile with
+            | Some tile when tile = pai -> ensure_tiles_in_hand state consumed
+            | Some _ -> Error "chi target is not the last kawa tile"
+            | None -> Error "no kawa tile to chi")
 
-      | Mjai.Pon { target; _ } ->
-          if target = state.player_id then
+      | Mjai.Pon { actor; target; pai; consumed } ->
+          if target = actor then
             Error "pon from itself"
           else if not cans.can_pon then
             Error "cannot pon"
-          else
-            Ok ()
+          else (match state.last_kawa_tile with
+            | Some tile when tile = pai -> ensure_tiles_in_hand state consumed
+            | Some _ -> Error "pon target is not the last kawa tile"
+            | None -> Error "no kawa tile to pon")
 
-      | Mjai.Daiminkan { target; _ } ->
-          if target = state.player_id then
+      | Mjai.Daiminkan { actor; target; pai; consumed } ->
+          if target = actor then
             Error "daiminkan from itself"
           else if not cans.can_daiminkan then
             Error "cannot daiminkan"
-          else
-            Ok ()
+          else (match state.last_kawa_tile with
+            | Some tile when tile = pai -> ensure_tiles_in_hand state consumed
+            | Some _ -> Error "daiminkan target is not the last kawa tile"
+            | None -> Error "no kawa tile for daiminkan")
 
       | Mjai.Kakan { pai; _ } ->
           if not cans.can_kakan then
             Error "cannot kakan"
-          else if tile_in_hand state pai then
-            Ok ()
           else
-            Error (Printf.sprintf "kakan: tile %d not in hand" pai)
+            let tile_idx = Tiles.deaka pai in
+            if List.mem tile_idx state.kakan_candidates then
+              ensure_tiles_in_hand state [|pai|]
+            else
+              Error (Printf.sprintf "cannot kakan tile %d (not in kakan_candidates)" pai)
 
-      | Mjai.Ankan _ ->
+      | Mjai.Ankan { consumed; _ } ->
           if not cans.can_ankan then
             Error "cannot ankan"
           else
-            Ok ()
+            let tile_idx = Tiles.deaka consumed.(0) in
+            if List.mem tile_idx state.ankan_candidates then
+              ensure_tiles_in_hand state consumed
+            else
+              Error (Printf.sprintf "cannot ankan tile %d (not in ankan_candidates)" consumed.(0))
 
       | Mjai.Hora { target; _ } ->
           if target = state.player_id then
