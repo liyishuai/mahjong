@@ -21,3 +21,7 @@
 (test
  (name test_state)
  (libraries mahjong.lib))
+
+(test
+ (name test_obs_repr)
+ (libraries mahjong))

@@ -2,7 +2,7 @@
  (name mahjong)
  (public_name mahjong.lib)
  (wrapped false)
- (modules tiles hand point agari shanten mjai state)
+ (modules tiles hand point agari shanten mjai state obs_repr)
  (libraries yojson))
 
 (executable
