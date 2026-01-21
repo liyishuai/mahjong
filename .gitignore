@@ -1,5 +1,6 @@
 .DS_Store
 .vscode
+.serena
 
 *.annot
 *.cmo
@@ -30,8 +31,6 @@ setup.log
 
 # Local OPAM switch
 _opam/
-Mortal
-mahjong-helper
 
 # Debug and scratch files
 debug_*.ml

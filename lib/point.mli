@@ -4,11 +4,11 @@
     calculates ron and tsumo payments. *)
 
 (** Point structure containing payment amounts *)
-type point = {
-  ron : int;       (** Points paid on ron (win by discard) *)
-  tsumo_ko : int;  (** Points each non-dealer pays on tsumo *)
-  tsumo_oya : int; (** Points dealer pays on tsumo (0 if winner is dealer) *)
-}
+type point =
+  { ron : int (** Points paid on ron (win by discard) *)
+  ; tsumo_ko : int (** Points each non-dealer pays on tsumo *)
+  ; tsumo_oya : int (** Points dealer pays on tsumo (0 if winner is dealer) *)
+  }
 
 (** Calculate points based on fu, han, and whether the winner is dealer.
     @param is_dealer true if the winner is the dealer (oya)

@@ -11,21 +11,21 @@
 
 (** Shanten calculation mode *)
 type shanten_mode =
-  | Normal  (** Standard hand form (4 melds + 1 pair) *)
-  | Chitoi  (** Seven pairs *)
-  | Kokushi  (** Thirteen orphans *)
+  | Normal (** Standard hand form (4 melds + 1 pair) *)
+  | Chitoi (** Seven pairs *)
+  | Kokushi (** Thirteen orphans *)
 
 (** Shanten result type *)
 type t = int
-  (** Negative values: hand is already winning
+(** Negative values: hand is already winning
        0: tenpai (one tile from winning)
        Positive: tiles away from tenpai *)
 
 (** Initialization errors *)
 type init_error =
-  | TableFileNotFound of string  (** Table file not found *)
-  | InvalidTableData of string   (** Table file is corrupted *)
-  | IoError of string            (** I/O error reading table *)
+  | TableFileNotFound of string (** Table file not found *)
+  | InvalidTableData of string (** Table file is corrupted *)
+  | IoError of string (** I/O error reading table *)
 
 (** Exception raised on table loading errors *)
 exception InitError of init_error

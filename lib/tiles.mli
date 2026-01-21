@@ -14,8 +14,8 @@
     These types represent which position a tile was taken from when forming
     a chii (sequence meld of three consecutive tiles). *)
 type chi_type =
-  | Low  (** Lower sequence: ABC from ABC - called with the leftmost tile *)
-  | Mid  (** Middle sequence: ABC from A[BC]D - called with the middle tile *)
+  | Low (** Lower sequence: ABC from ABC - called with the leftmost tile *)
+  | Mid (** Middle sequence: ABC from A[BC]D - called with the middle tile *)
   | High (** Upper sequence: ABC from [AB]CD - called with the rightmost tile *)
 
 (** Tile type - integer 0-37 representing tile IDs *)
@@ -23,8 +23,8 @@ type tile = int
 
 (** Error type for invalid tile conversions *)
 type invalid_tile =
-  | Number of int  (** Invalid numeric ID *)
-  | String of string  (** Invalid string representation *)
+  | Number of int (** Invalid numeric ID *)
+  | String of string (** Invalid string representation *)
 
 (** {1 Conversion functions} *)
 
@@ -87,6 +87,7 @@ val cmp_discard_priority : tile -> tile -> int
 
 (** Tile ID constants for pattern matching and convenience *)
 val tile_id_1m : int
+
 val tile_id_2m : int
 val tile_id_3m : int
 val tile_id_4m : int
