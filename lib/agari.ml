@@ -345,7 +345,7 @@ let is_seven_pairs (tiles34 : int array) : bool =
     !pair_count = 7)
 ;;
 
-(** Check if a 3n+2 hand can be divided into melds (reference implementation).
+(** Check if a 3n+2 hand can be divided into melds.
 
     Implements the backtracking algorithm from mjalgorism.html:
     1. Try seven pairs special form first
@@ -476,7 +476,8 @@ let check_pinfu (calc : agari_calculator) (div : div) (tile14 : int array) : boo
   Array.exists
     (fun s ->
        let num = (s mod 9) + 1 in
-       (* 1-indexed like Rust *)
+       (* 1-indexed *)
+
        (* For ryanmen: can wait for first tile or last tile *)
        (num <= 6 && s = calc.winning_tile) || (num >= 2 && s + 2 = calc.winning_tile))
     (Array.map

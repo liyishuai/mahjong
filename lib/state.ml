@@ -3,7 +3,7 @@
     This module provides core state management for tracking game state
     and validating player actions based on MJAI events.
 
-    Uses mutable state for performance (matches Rust libriichi implementation).
+    Uses mutable state for performance.
 *)
 
 (** Action candidate representing possible actions from current state *)
@@ -148,6 +148,7 @@ type player_state =
   ; mutable doras_seen : int (* Total visible dora count *)
   ; (* Red tile (aka) tracking *)
     mutable akas_in_hand : bool array (* [5mr, 5pr, 5sr] presence in hand *)
+  ; mutable akas_seen : bool array (* [5mr, 5pr, 5sr] seen on board or in hand *)
   ; (* Meld overview (fuuro_overview) - tracks all melds with constituent tiles *)
     (* For each player (0-3), list of melds, each meld is a list of tiles *)
     mutable fuuro_overview : int list list array (* [player][meld][tile] *)
@@ -155,7 +156,7 @@ type player_state =
   ; (* River tracking *)
     (* kawa: list of turns, each turn is optional KawaItem. Newest first? Or Oldest first? *)
     (* Let's assume reversed (newest first) for efficient cons, but need to reverse for iteration *)
-    (* Actually, Rust uses push (append). We can use a reversed list and reverse it when needed, or just append if list is short. *)
+    (* We use a reversed list and reverse it when needed, or append if list is short. *)
     (* For 20 items, append is fine. `list = list @ [item]` *)
     (* Or keep it reversed and let obs_repr handle it. Let's keep it reversed (Stack-like). *)
     mutable kawa : kawa_item option list array (* [player][turn] *)
@@ -221,6 +222,7 @@ let create_player_state (player_id : int) : player_state =
   ; doras_seen = 0
   ; (* Red tile tracking *)
     akas_in_hand = [| false; false; false |]
+  ; akas_seen = [| false; false; false |]
   ; (* Meld overview - 4 players, each with empty meld list *)
     fuuro_overview = [| []; []; []; [] |]
   ; ankan_overview = [| []; []; []; [] |]
@@ -386,128 +388,25 @@ let get_rank (state : player_state) (scores_rel : int array) : int =
 (** Update current player's rank *)
 let update_rank (state : player_state) : unit = state.rank <- get_rank state state.scores
 
-(** Start a new kyoku (round) *)
-let start_kyoku
-      (state : player_state)
-      (bakaze : int)
-      (kyoku : int)
-      (honba : int)
-      (kyotaku : int)
-      (oya : int)
-      (scores : int array)
-      (tehais : int array array)
-  : unit
-  =
-  let actor_tehai = tehais.(state.player_id) in
-  state.bakaze <- bakaze;
-  state.jikaze <- Tiles.tile_id_E + ((state.player_id - oya + 4) mod 4);
-  state.kyoku <- kyoku;
-  state.honba <- honba;
-  state.kyotaku <- kyotaku;
-  state.oya <- oya;
-  (* Store scores as relative to self *)
-  let rel_scores = Array.make 4 0 in
-  for i = 0 to 3 do
-    rel_scores.((i + 4 - state.player_id) mod 4) <- scores.(i)
-  done;
-  state.scores <- rel_scores;
-  update_rank state;
-  state.is_all_last
-  <- (match bakaze with
-      | t when t = Tiles.tile_id_E -> false
-      | t when t = Tiles.tile_id_S -> kyoku = 4
-      | _ -> true);
-  (* Reset and populate tehai *)
-  state.tehai <- Array.make 34 0;
-  (* Reset dora tracking *)
-  state.dora_indicators <- [];
-  Array.fill state.dora_factor 0 34 0;
-  Array.fill state.doras_owned 0 4 0;
-  state.doras_seen <- 0;
-  (* Reset red tile tracking *)
-  state.akas_in_hand <- [| false; false; false |];
-  
-  Array.iter (fun tile ->
-    let idx = Tiles.deaka tile in
-    if idx >= 0 && idx < 34 then (
-      state.tehai.(idx) <- state.tehai.(idx) + 1;
-      if Tiles.is_aka tile then (
-        let aka_idx = match tile with
-          | t when t = Tiles.tile_id_5mr -> 0
-          | t when t = Tiles.tile_id_5pr -> 1
-          | t when t = Tiles.tile_id_5sr -> 2
-          | _ -> -1
-        in
-        if aka_idx >= 0 then (
-          state.akas_in_hand.(aka_idx) <- true;
-          state.doras_owned.(0) <- state.doras_owned.(0) + 1
-        )
+(** Updates tiles_seen, doras_seen and akas_seen. *)
+let witness_tile state tile =
+  let idx = Tiles.deaka tile in
+  if idx >= 0 && idx < 34 then (
+    state.tiles_seen.(idx) <- state.tiles_seen.(idx) + 1;
+    state.doras_seen <- state.doras_seen + state.dora_factor.(idx);
+    if Tiles.is_aka tile then (
+      let aka_idx = match tile with
+        | t when t = Tiles.tile_id_5mr -> 0
+        | t when t = Tiles.tile_id_5pr -> 1
+        | t when t = Tiles.tile_id_5sr -> 2
+        | _ -> -1
+      in
+      if aka_idx >= 0 then (
+        state.akas_seen.(aka_idx) <- true;
+        state.doras_seen <- state.doras_seen + 1
       )
     )
-  ) actor_tehai;
-  (* Reset flags *)
-  state.riichi_declared <- Array.make 4 false;
-  state.riichi_accepted <- Array.make 4 false;
-  state.is_menzen <- true;
-  state.can_w_riichi <- true;
-  state.is_w_riichi <- false;
-  state.at_rinshan <- false;
-  state.at_ippatsu <- false;
-  state.last_self_tsumo <- None;
-  state.last_kawa_tile <- None;
-  state.kans_on_board <- 0;
-  state.chis <- [];
-  state.pons <- [];
-  state.minkans <- [];
-  state.ankans <- [];
-  state.ankan_candidates <- [];
-  state.kakan_candidates <- [];
-  state.tiles_left <- 70;
-  (* Reset advanced tracking *)
-  state.tehai_len_div3 <- Array.fold_left (+) 0 state.tehai / 3;
-  state.shanten <- 8;
-  state.waits <- Array.make 34 false;
-  state.at_furiten <- false;
-  state.to_mark_same_cycle_furiten <- false;
-  state.chankan_chance <- false;
-  state.has_next_shanten_discard <- false;
-  state.keep_shanten_discards <- Array.make 34 false;
-  state.next_shanten_discards <- Array.make 34 false;
-  state.forbidden_tiles <- Array.make 34 false;
-  state.tiles_seen <- Array.make 34 0;
-  state.discarded_tiles <- Array.make 34 false;
-  (* Reset meld overview *)
-  state.fuuro_overview <- [| []; []; []; [] |];
-  state.ankan_overview <- [| []; []; []; [] |];
-  (* Reset river tracking *)
-  state.kawa <- Array.make 4 [];
-  state.kawa_overview <- Array.make 4 [];
-  state.last_tedashis <- Array.make 4 None;
-  state.intermediate_kan <- [];
-  state.intermediate_chi_pon <- None;
-  (* Pad kawa at start *)
-  let rel_oya = (oya + 4 - state.player_id) mod 4 in
-  for i = 0 to rel_oya - 1 do
-    state.kawa.(i) <- [ None ]
-  done
-;;
-
-(** Pad kawa for pon or daiminkan *)
-let pad_kawa_for_pon_or_daiminkan
-      (state : player_state)
-      (abs_actor : int)
-      (abs_target : int)
-  : unit
-  =
-  let rec loop i =
-    if i <> abs_actor
-    then (
-      let rel = (i + 4 - state.player_id) mod 4 in
-      state.kawa.(rel) <- None :: state.kawa.(rel);
-      loop ((i + 1) mod 4))
-  in
-  loop ((abs_target + 1) mod 4)
-;;
+  )
 
 (** Update shanten for current hand *)
 let update_shanten (state : player_state) : unit =
@@ -573,6 +472,133 @@ let update_waits_and_furiten (state : player_state) : unit =
     done
 ;;
 
+(** Start a new kyoku (round) *)
+let start_kyoku
+      (state : player_state)
+      (bakaze : int)
+      (kyoku : int)
+      (honba : int)
+      (kyotaku : int)
+      (oya : int)
+      (scores : int array)
+      (tehais : int array array)
+  : unit
+  =
+  let actor_tehai = tehais.(state.player_id) in
+  state.bakaze <- bakaze;
+  state.jikaze <- Tiles.tile_id_E + ((state.player_id - oya + 4) mod 4);
+  state.kyoku <- kyoku;
+  state.honba <- honba;
+  state.kyotaku <- kyotaku;
+  state.oya <- oya;
+  (* Store scores as relative to self *)
+  let rel_scores = Array.make 4 0 in
+  for i = 0 to 3 do
+    rel_scores.((i + 4 - state.player_id) mod 4) <- scores.(i)
+  done;
+  state.scores <- rel_scores;
+  update_rank state;
+  state.is_all_last
+  <- (match bakaze with
+      | t when t = Tiles.tile_id_E -> false
+      | t when t = Tiles.tile_id_S -> kyoku = 4
+      | _ -> true);
+  (* Reset and populate tehai *)
+  state.tehai <- Array.make 34 0;
+  (* Reset dora tracking *)
+  state.dora_indicators <- [];
+  Array.fill state.dora_factor 0 34 0;
+  Array.fill state.doras_owned 0 4 0;
+  state.doras_seen <- 0;
+  (* Reset red tile tracking *)
+  state.akas_in_hand <- [| false; false; false |];
+  state.akas_seen <- [| false; false; false |];
+  
+  Array.iter (fun tile ->
+    let idx = Tiles.deaka tile in
+    if idx >= 0 && idx < 34 then (
+      witness_tile state tile;
+      state.tehai.(idx) <- state.tehai.(idx) + 1;
+      if Tiles.is_aka tile then (
+        let aka_idx = match tile with
+          | t when t = Tiles.tile_id_5mr -> 0
+          | t when t = Tiles.tile_id_5pr -> 1
+          | t when t = Tiles.tile_id_5sr -> 2
+          | _ -> -1
+        in
+        if aka_idx >= 0 then (
+          state.akas_in_hand.(aka_idx) <- true;
+          state.doras_owned.(0) <- state.doras_owned.(0) + 1
+        )
+      )
+    )
+  ) actor_tehai;
+  (* Reset flags *)
+  state.riichi_declared <- Array.make 4 false;
+  state.riichi_accepted <- Array.make 4 false;
+  state.is_menzen <- true;
+  state.can_w_riichi <- true;
+  state.is_w_riichi <- false;
+  state.at_rinshan <- false;
+  state.at_ippatsu <- false;
+  state.last_self_tsumo <- None;
+  state.last_kawa_tile <- None;
+  state.kans_on_board <- 0;
+  state.chis <- [];
+  state.pons <- [];
+  state.minkans <- [];
+  state.ankans <- [];
+  state.ankan_candidates <- [];
+  state.kakan_candidates <- [];
+  state.tiles_left <- 70;
+  (* Reset advanced tracking *)
+  state.tehai_len_div3 <- Array.fold_left (+) 0 state.tehai / 3;
+  state.shanten <- 8;
+  state.waits <- Array.make 34 false;
+  state.at_furiten <- false;
+  state.to_mark_same_cycle_furiten <- false;
+  state.chankan_chance <- false;
+  state.has_next_shanten_discard <- false;
+  state.keep_shanten_discards <- Array.make 34 false;
+  state.next_shanten_discards <- Array.make 34 false;
+  state.forbidden_tiles <- Array.make 34 false;
+  state.tiles_seen <- Array.make 34 0;
+  state.discarded_tiles <- Array.make 34 false;
+  (* Reset meld overview *)
+  state.fuuro_overview <- [| []; []; []; [] |];
+  state.ankan_overview <- [| []; []; []; [] |];
+  (* Reset river tracking *)
+  state.kawa <- Array.make 4 [];
+  state.kawa_overview <- Array.make 4 [];
+  state.last_tedashis <- Array.make 4 None;
+  state.intermediate_kan <- [];
+  state.intermediate_chi_pon <- None;
+  update_shanten state;
+  update_waits_and_furiten state;
+  (* Pad kawa at start *)
+  let rel_oya = (oya + 4 - state.player_id) mod 4 in
+  for i = 0 to rel_oya - 1 do
+    state.kawa.(i) <- [ None ]
+  done
+;;
+
+(** Pad kawa for pon or daiminkan *)
+let pad_kawa_for_pon_or_daiminkan
+      (state : player_state)
+      (abs_actor : int)
+      (abs_target : int)
+  : unit
+  =
+  let rec loop i =
+    if i <> abs_actor
+    then (
+      let rel = (i + 4 - state.player_id) mod 4 in
+      state.kawa.(rel) <- None :: state.kawa.(rel);
+      loop ((i + 1) mod 4))
+  in
+  loop ((abs_target + 1) mod 4)
+;;
+
 (** Calculate real-time shanten considering 3n+2 hands *)
 let real_time_shanten (state : player_state) : int =
   if not state.last_cans.can_discard
@@ -595,6 +621,7 @@ let add_dora_indicator (state : player_state) (tile : int) : unit =
   then (
     (* Add to indicators list *)
     state.dora_indicators <- state.dora_indicators @ [ tile ];
+    witness_tile state tile;
     (* Get the dora tile (next tile after indicator) *)
     let dora_tile = Tiles.next tile in
     let dora_idx = Tiles.deaka dora_tile in
@@ -636,6 +663,7 @@ let tsumo (state : player_state) (actor : int) (pai : int) : unit =
     then (
       (* Decrement tiles left *)
       if state.tiles_left > 0 then state.tiles_left <- state.tiles_left - 1;
+      witness_tile state pai;
       state.tehai.(idx) <- state.tehai.(idx) + 1;
       state.last_self_tsumo <- Some pai;
       (* Update akas_in_hand tracking *)
@@ -649,7 +677,7 @@ let tsumo (state : player_state) (actor : int) (pai : int) : unit =
       if Tiles.is_aka pai then state.doras_owned.(0) <- state.doras_owned.(0) + 1;
       (* Update advanced tracking after drawing *)
       state.tehai_len_div3 <- Array.fold_left ( + ) 0 state.tehai / 3;
-      update_shanten state;
+      (* update_shanten state;  <-- REMOVED to match Rust parity *)
       (* update_waits_and_furiten state;  <-- REMOVED *)
       if not state.riichi_accepted.(0) then update_shanten_discards state;
       (* Check for tsumo agari *)
@@ -748,7 +776,7 @@ let set_can_chi_from_tile (state : player_state) (tile : int) : unit =
       then (
         (* Simulate removing the chi tiles from hand *)
         let tehai_after = Array.copy state.tehai in
-        (* Set tile_id to 0 to prevent "cheating" - see Rust comment about 1111234 case *)
+        (* Set tile_id to 0 to prevent "cheating" (1111234 case) *)
         tehai_after.(tile_id) <- 0;
         tehai_after.(tile_id + 1) <- tehai_after.(tile_id + 1) - 1;
         tehai_after.(tile_id + 2) <- tehai_after.(tile_id + 2) - 1;
@@ -879,26 +907,28 @@ let dahai (state : player_state) (actor : int) (pai : int) (tsumogiri : bool) : 
       state.tehai_len_div3 <- Array.fold_left ( + ) 0 state.tehai / 3;
       update_shanten state;
       update_waits_and_furiten state))
-  else if
-    (* Another player discarded - check if we can react *)
-    (not state.riichi_accepted.(0)) && state.tiles_left > 0
-  then (
-    let idx = Tiles.deaka pai in
-    (* Check for chi (only from kamicha = actor + 1) *)
-    let relative_pos = (actor - state.player_id + 4) mod 4 in
-    if relative_pos = 3 && idx < 27 && state.tehai_len_div3 > 0
-    then set_can_chi_from_tile state pai;
-    (* Check for pon *)
-    if idx >= 0 && idx < 34
-    then
-      state.last_cans
-      <- { state.last_cans with
-           can_pon = state.tehai.(idx) >= 2
-         ; can_daiminkan = state.kans_on_board < 4 && state.tehai.(idx) = 3
-         };
-    (* Check for ron agari *)
-    if check_can_ron state pai false
-    then state.last_cans <- { state.last_cans with can_ron_agari = true })
+  else (
+    witness_tile state pai;
+    if
+      (* Another player discarded - check if we can react *)
+      (not state.riichi_accepted.(0)) && state.tiles_left > 0
+    then (
+      let idx = Tiles.deaka pai in
+      (* Check for chi (only from kamicha = actor + 1) *)
+      let relative_pos = (actor - state.player_id + 4) mod 4 in
+      if relative_pos = 3 && idx < 27 && state.tehai_len_div3 > 0
+      then set_can_chi_from_tile state pai;
+      (* Check for pon *)
+      if idx >= 0 && idx < 34
+      then
+        state.last_cans
+        <- { state.last_cans with
+             can_pon = state.tehai.(idx) >= 2
+           ; can_daiminkan = state.kans_on_board < 4 && state.tehai.(idx) = 3
+           };
+      (* Check for ron agari *)
+      if check_can_ron state pai false
+      then state.last_cans <- { state.last_cans with can_ron_agari = true }))
 ;;
 
 (** Handle chi (sequence meld) event *)
@@ -936,7 +966,9 @@ let chi (state : player_state) (actor : int) (pai : int) (consumed : int array) 
     update_shanten state;
     update_shanten_discards state
   end else begin
-    ()
+    Array.iter (witness_tile state) consumed;
+    state.can_w_riichi <- false;
+    state.at_ippatsu <- false
   end
 ;;
 
@@ -971,7 +1003,9 @@ let pon (state : player_state) (actor : int) (target : int) (pai : int) (consume
     update_shanten state;
     update_shanten_discards state
   end else begin
-    ()
+    Array.iter (witness_tile state) consumed;
+    state.can_w_riichi <- false;
+    state.at_ippatsu <- false
   end
 ;;
 
@@ -1018,6 +1052,10 @@ let ankan (state : player_state) (actor : int) (consumed : int array) : unit =
     (* Update tracking *)
     update_shanten state;
     update_waits_and_furiten state)
+  else (
+    Array.iter (witness_tile state) consumed;
+    state.can_w_riichi <- false;
+    state.at_ippatsu <- false)
 ;;
 
 (** Handle kakan (pon → kan) *)
@@ -1049,6 +1087,10 @@ let kakan (state : player_state) (actor : int) (pai : int) : unit =
       (* Update tracking *)
       update_shanten state;
       update_waits_and_furiten state))
+  else (
+    witness_tile state pai;
+    state.can_w_riichi <- false;
+    state.at_ippatsu <- false)
 ;;
 
 (** Handle daiminkan (closed kan → open kan) *)
@@ -1086,7 +1128,10 @@ let daiminkan
     (* Update tracking *)
     update_shanten state;
     update_waits_and_furiten state)
-  else ()
+  else (
+    Array.iter (witness_tile state) consumed;
+    state.can_w_riichi <- false;
+    state.at_ippatsu <- false)
 ;;
 
 (** Main update function - process MJAI event and update state *)
@@ -1300,7 +1345,7 @@ let rule_based_agari (state : player_state) : bool =
   then false
   else if
     (* Helper to check if we should agari based on rules *)
-    (* Logic ported from Rust rule_based_agari_slow *)
+    (* Rule-based agari decision logic *)
 
     (* Agari if it is not yet all-last, or we are oya ourselves, or we are not the last place *)
     (not state.is_all_last) || state.oya = state.player_id || state.rank < 3
@@ -1580,7 +1625,7 @@ let discard_candidates_with_unconditional_tenpai_aka (state : player_state) : bo
 (** {1 Getter Functions}
 
     These functions provide read-only access to player state fields.
-    Corresponds to the getter module in Rust libriichi. *)
+    Getter functions for accessing state fields. *)
 
 (** Get player ID *)
 let player_id (state : player_state) : int = state.player_id
@@ -1689,3 +1734,715 @@ let akas_in_hand (state : player_state) : bool array = state.akas_in_hand
 
 (** Get fuuro overview - all melds for all players with constituent tiles *)
 let fuuro_overview (state : player_state) : int list list array = state.fuuro_overview
+
+(** ==================================================================== *)
+(** Single Player Tables *)
+(** ==================================================================== *)
+
+(** Single player tables for RL agent *)
+type single_player_tables = {
+  max_ev_table : Sp.candidate list;
+}
+
+
+(** ==================================================================== *)
+(** Observation Encoding *)
+(** ==================================================================== *)
+
+let action_space = 46
+
+let obs_shape version =
+  match version with
+  | 1 -> 938, 34
+  | 2 -> 942, 34
+  | 3 -> 934, 34
+  | 4 -> 1012, 34
+  | _ -> failwith "invalid version"
+;;
+
+type obs =
+  { features : float array
+  ; mask : bool array
+  }
+
+type context =
+  { _state : player_state
+  ; arr : float array
+  ; rows : int
+  ; cols : int
+  ; mask : bool array
+  ; mutable idx : int
+  ; _at_kan_select : bool
+  ; version : int
+  }
+
+let create_context state version at_kan_select =
+  let rows, cols = obs_shape version in
+  { _state = state
+  ; arr = Array.make (rows * cols) 0.0
+  ; rows
+  ; cols
+  ; mask = Array.make action_space false
+  ; idx = 0
+  ; _at_kan_select = at_kan_select
+  ; version
+  }
+;;
+
+let assign_row ctx row_offset col value =
+  if ctx.idx + row_offset < ctx.rows && col < ctx.cols
+  then ctx.arr.(((ctx.idx + row_offset) * ctx.cols) + col) <- value
+;;
+
+let fill_row ctx row_offset value =
+  if ctx.idx + row_offset < ctx.rows
+  then
+    for j = 0 to ctx.cols - 1 do
+      ctx.arr.(((ctx.idx + row_offset) * ctx.cols) + j) <- value
+    done
+;;
+
+let assign_rows ctx row_offset col n value =
+  for i = 0 to n - 1 do
+    assign_row ctx (row_offset + i) col value
+  done
+;;
+
+let fill_rows ctx row_offset n value =
+  for i = 0 to n - 1 do
+    fill_row ctx (row_offset + i) value
+  done
+;;
+
+type integer_encoder =
+  { n : int
+  ; cap : int
+  ; one_hot : bool
+  ; rescale : bool
+  ; rbf_intervals : int option
+  }
+
+let encode_int ctx enc =
+  let n = min enc.n enc.cap in
+  match ctx.version with
+  | 1 ->
+    fill_rows ctx 0 n 1.0;
+    ctx.idx <- ctx.idx + enc.cap
+  | 2 | 3 ->
+    if enc.one_hot
+    then (
+      fill_row ctx n 1.0;
+      ctx.idx <- ctx.idx + enc.cap + 1);
+    if enc.rescale
+    then (
+      let v = float_of_int n /. float_of_int enc.cap in
+      fill_row ctx 0 v;
+      ctx.idx <- ctx.idx + 1);
+    (match enc.rbf_intervals with
+     | Some intervals ->
+       let interval_size = float_of_int enc.cap /. float_of_int intervals in
+       for i = 1 to intervals - 1 do
+         let x = float_of_int enc.n in
+         let mu = float_of_int i *. interval_size in
+         let sigma = interval_size in
+         let v = exp ((-.((x -. mu) ** 2.0)) /. (2.0 *. (sigma ** 2.0))) in
+         fill_row ctx 0 v;
+         ctx.idx <- ctx.idx + 1
+       done
+     | None -> ())
+  | 4 ->
+    if enc.one_hot
+    then (
+      fill_row ctx n 1.0;
+      ctx.idx <- ctx.idx + enc.cap + 1);
+    if enc.rescale
+    then (
+      let v = float_of_int n /. float_of_int enc.cap in
+      fill_row ctx 0 v;
+      ctx.idx <- ctx.idx + 1)
+  | _ -> assert false
+;;
+
+let encode_tile_set ctx tiles =
+  let counts = Array.make 34 0 in
+  List.iter
+    (fun tile ->
+       let tid = Tiles.deaka tile in
+       if tid < ctx.cols
+       then (
+         let i = counts.(tid) in
+         if i < 4 then (
+           assign_row ctx i tid 1.0;
+           counts.(tid) <- i + 1
+         );
+         if Tiles.is_aka tile then (
+           let aka_idx = match tile with
+             | t when t = Tiles.tile_id_5mr -> 0
+             | t when t = Tiles.tile_id_5pr -> 1
+             | t when t = Tiles.tile_id_5sr -> 2
+             | _ -> -1
+           in
+           if aka_idx >= 0 then fill_row ctx (4 + aka_idx) 1.0
+         )
+       ))
+    tiles;
+  ctx.idx <- ctx.idx + 7
+;;
+
+let encode_self_kawa ctx item_opt =
+  match item_opt with
+  | Some item ->
+    List.iter (fun t -> assign_row ctx 0 (Tiles.deaka t) 1.0) item.kan;
+    let tid = Tiles.deaka item.sutehai.tile in
+    assign_row ctx 1 tid 1.0;
+    if Tiles.is_aka item.sutehai.tile then fill_row ctx 2 1.0;
+    if item.sutehai.is_dora then fill_row ctx 3 1.0;
+    ctx.idx <- ctx.idx + 4
+  | None -> ctx.idx <- ctx.idx + 4
+;;
+
+let encode_kawa ctx item_opt =
+  match item_opt with
+  | Some item ->
+    (match item.chi_pon with
+     | Some cp ->
+       assign_row ctx 0 (Tiles.deaka cp.consumed.(0)) 1.0;
+       assign_row ctx 0 (Tiles.deaka cp.consumed.(1)) 1.0
+     | None -> ());
+    List.iter (fun t -> assign_row ctx 1 (Tiles.deaka t) 1.0) item.kan;
+    let tid = Tiles.deaka item.sutehai.tile in
+    assign_row ctx 2 tid 1.0;
+    if Tiles.is_aka item.sutehai.tile then fill_row ctx 3 1.0;
+    if item.sutehai.is_tedashi then fill_row ctx 4 1.0;
+    if item.sutehai.is_riichi then fill_row ctx 5 1.0;
+    if item.sutehai.is_dora then fill_row ctx 6 1.0;
+    ctx.idx <- ctx.idx + 8
+  | None -> ctx.idx <- ctx.idx + 8
+;;
+
+let encode_obs state version at_kan_select =
+  let ctx = create_context state version at_kan_select in
+  (* Tehai *)
+  for tid = 0 to 33 do
+    let count = state.tehai.(tid) in
+    if count > 0 then assign_rows ctx 0 tid count 1.0
+  done;
+  ctx.idx <- ctx.idx + 4;
+  (* Akas in hand *)
+  for i = 0 to 2 do
+    if state.akas_in_hand.(i) then fill_row ctx i 1.0
+  done;
+  ctx.idx <- ctx.idx + 3;
+  (* Scores *)
+  for i = 0 to 3 do
+    let score = state.scores.(i) in
+    let v = float_of_int (max 0 (min score 100000)) /. 100000.0 in
+    fill_row ctx 0 v;
+    ctx.idx <- ctx.idx + 1;
+    match version with
+    | 2 | 3 ->
+      encode_int
+        ctx
+        { n = score / 100
+        ; cap = 500
+        ; one_hot = false
+        ; rescale = false
+        ; rbf_intervals = Some 10
+        }
+    | 4 ->
+      let v2 = float_of_int (max 0 (min score 30000)) /. 30000.0 in
+      fill_row ctx 0 v2;
+      ctx.idx <- ctx.idx + 1
+    | _ -> ()
+  done;
+  (* Rank *)
+  fill_row ctx state.rank 1.0;
+  ctx.idx <- ctx.idx + 4;
+  (* Kyoku *)
+  (match version with
+   | 1 -> fill_rows ctx 0 state.kyoku 1.0
+   | _ -> fill_row ctx state.kyoku 1.0);
+  ctx.idx <- ctx.idx + 4;
+  (* Honba and Kyotaku *)
+  let cap = if version = 1 || version = 4 then 10 else 6 in
+  encode_int
+    ctx
+    { n = state.honba
+    ; cap
+    ; one_hot = false
+    ; rescale = version = 4
+    ; rbf_intervals = Some 3
+    };
+  encode_int
+    ctx
+    { n = state.kyotaku
+    ; cap
+    ; one_hot = false
+    ; rescale = version = 4
+    ; rbf_intervals = Some 3
+    };
+  (* Winds *)
+  assign_row ctx 0 (Tiles.deaka state.bakaze) 1.0;
+  assign_row ctx 1 (Tiles.deaka state.jikaze) 1.0;
+  ctx.idx <- ctx.idx + 2;
+  if version >= 2
+  then (
+    let n = ((if Tiles.deaka state.bakaze = Tiles.tile_id_E then 0 else 1) * 4) + state.kyoku in
+    encode_int ctx { n; cap = 7; one_hot = false; rescale = true; rbf_intervals = None });
+  (* Dora indicators *)
+  encode_tile_set ctx state.dora_indicators;
+  (* Self Kawa *)
+  let self_kawa = List.rev state.kawa.(0) in
+  let self_kawa_len = List.length self_kawa in
+  let rec take n l =
+    if n <= 0
+    then []
+    else (
+      match l with
+      | [] -> []
+      | h :: t -> h :: take (n - 1) t)
+  in
+  List.iter (encode_self_kawa ctx) (take 6 self_kawa);
+  ctx.idx <- ctx.idx + (max 0 (6 - self_kawa_len) * 4);
+  let rev_kawa = List.rev self_kawa in
+  List.iter (encode_self_kawa ctx) (take 18 rev_kawa);
+  ctx.idx <- ctx.idx + (max 0 (18 - self_kawa_len) * 4);
+  let max_kawa_len = ref 0 in
+  for i = 0 to 3 do
+    max_kawa_len := max !max_kawa_len (List.length state.kawa.(i))
+  done;
+  let max_kawa_len = !max_kawa_len in
+  if version >= 3
+  then (
+    List.iteri
+      (fun turn item_opt ->
+         match item_opt with
+         | Some item ->
+           let tid = Tiles.deaka item.sutehai.tile in
+           let v = exp (-0.2 *. float_of_int (max_kawa_len - 1 - turn)) in
+           assign_row ctx 0 tid v
+         | None -> ())
+      self_kawa;
+    ctx.idx <- ctx.idx + 1);
+  (* Others Kawa *)
+  for i = 1 to 3 do
+    let player_kawa = List.rev state.kawa.(i) in
+    let player_kawa_len = List.length player_kawa in
+    List.iter (encode_kawa ctx) (take 6 player_kawa);
+    ctx.idx <- ctx.idx + (max 0 (6 - player_kawa_len) * 8);
+    let rev_pkawa = List.rev player_kawa in
+    List.iter (encode_kawa ctx) (take 18 rev_pkawa);
+    ctx.idx <- ctx.idx + (max 0 (18 - player_kawa_len) * 8);
+    match version with
+    | 2 ->
+      List.iteri
+        (fun turn item_opt ->
+           match item_opt with
+           | Some item ->
+             let row = min (turn / 6) 2 in
+             let tid = Tiles.deaka item.sutehai.tile in
+             assign_row ctx row tid 1.0;
+             if item.sutehai.is_tedashi then assign_row ctx (3 + row) tid 1.0
+           | None -> ())
+        player_kawa;
+      ctx.idx <- ctx.idx + 6
+    | 3 | 4 ->
+      List.iteri
+        (fun turn item_opt ->
+           match item_opt with
+           | Some item ->
+             let tid = Tiles.deaka item.sutehai.tile in
+             let v = exp (-0.2 *. float_of_int (max_kawa_len - 1 - turn)) in
+             assign_row ctx 0 tid v;
+             if item.sutehai.is_tedashi then assign_row ctx 1 tid v;
+             if item.sutehai.is_riichi then assign_row ctx 2 tid v
+           | None -> ())
+        player_kawa;
+      ctx.idx <- ctx.idx + 3
+    | _ -> ()
+  done;
+  (* Tiles left *)
+  let v = float_of_int state.tiles_left /. 69.0 in
+  fill_row ctx 0 v;
+  ctx.idx <- ctx.idx + 1;
+  (* Doras owned *)
+  for i = 0 to 3 do
+    encode_int
+      ctx
+      { n = state.doras_owned.(i)
+      ; cap = 12
+      ; one_hot = false
+      ; rescale = true
+      ; rbf_intervals = Some 3
+      }
+  done;
+  (* Doras unseen *)
+  let doras_unseen = (List.length state.dora_indicators * 4) + 3 - state.doras_seen in
+  encode_int
+    ctx
+    { n = doras_unseen
+    ; cap = (5 * 4) + 3
+    ; one_hot = false
+    ; rescale = true
+    ; rbf_intervals = Some 4
+    };
+  (* Kawa Overview *)
+  for i = 0 to 3 do
+    encode_tile_set ctx state.kawa_overview.(i)
+  done;
+  (* Fuuro Overview *)
+  for p = 0 to 3 do
+    let player_fuuro = state.fuuro_overview.(p) in
+    List.iter
+      (fun meld ->
+         List.iter
+           (fun tile ->
+              let tid = Tiles.deaka tile in
+              let rec find_row r =
+                if r >= 4
+                then ()
+                else if ctx.arr.(((ctx.idx + r) * ctx.cols) + tid) = 0.0
+                then assign_row ctx r tid 1.0
+                else find_row (r + 1)
+              in
+              find_row 0;
+              if Tiles.is_aka tile then fill_row ctx 4 1.0)
+           meld;
+         ctx.idx <- ctx.idx + 5)
+      player_fuuro;
+    ctx.idx <- ctx.idx + ((4 - List.length player_fuuro) * 5)
+  done;
+  (* Ankan Overview *)
+  for p = 0 to 3 do
+    List.iter (fun tid -> assign_row ctx 0 tid 1.0) state.ankan_overview.(p);
+    ctx.idx <- ctx.idx + 1
+  done;
+  if version >= 2
+  then (
+    (* Tiles Seen *)
+    for tid = 0 to 33 do
+      assign_row ctx 0 tid (float_of_int state.tiles_seen.(tid) /. 4.0)
+    done;
+    ctx.idx <- ctx.idx + 1;
+    (* Last Tedashis *)
+    for i = 1 to 3 do
+      (match state.last_tedashis.(i) with
+       | Some sute ->
+         let tid = Tiles.deaka sute.tile in
+         assign_row ctx 0 tid 1.0;
+         if Tiles.is_aka sute.tile then fill_row ctx 1 1.0;
+         if sute.is_dora then fill_row ctx 2 1.0
+       | None -> ());
+      ctx.idx <- ctx.idx + 3
+    done;
+    (* Riichi Sutehais *)
+    for i = 1 to 3 do
+      let found = ref false in
+      List.iter
+        (function
+          | Some item when item.sutehai.is_riichi ->
+            let tid = Tiles.deaka item.sutehai.tile in
+            assign_row ctx 0 tid 1.0;
+            if Tiles.is_aka item.sutehai.tile then fill_row ctx 1 1.0;
+            if item.sutehai.is_dora then fill_row ctx 2 1.0;
+            found := true
+          | _ -> ())
+        state.kawa.(i);
+      ctx.idx <- ctx.idx + 3
+    done);
+  (* Riichi status *)
+  for i = 1 to 3 do
+    if state.riichi_declared.(i) then fill_row ctx 0 1.0;
+    ctx.idx <- ctx.idx + 1
+  done;
+  for i = 1 to 3 do
+    if state.riichi_accepted.(i) then fill_row ctx 0 1.0;
+    ctx.idx <- ctx.idx + 1
+  done;
+  (* Waits *)
+  for tid = 0 to 33 do
+    if state.waits.(tid) then assign_row ctx 0 tid 1.0
+  done;
+  ctx.idx <- ctx.idx + 1;
+  if state.at_furiten then fill_row ctx 0 1.0;
+  ctx.idx <- ctx.idx + 1;
+  (* Shanten *)
+  encode_int
+    ctx
+    { n = state.shanten; cap = 6; one_hot = true; rescale = false; rbf_intervals = None };
+  if state.riichi_accepted.(0) then fill_row ctx 0 1.0;
+  ctx.idx <- ctx.idx + 1;
+  if at_kan_select then fill_row ctx 0 1.0;
+  ctx.idx <- ctx.idx + 1;
+  (* Action Mask *)
+  let cans = state.last_cans in
+  if can_pass cans
+  then (
+    match state.last_kawa_tile with
+    | Some tile ->
+      let tid = Tiles.deaka tile in
+      assign_row ctx 0 tid 1.0;
+      if Tiles.is_aka tile then fill_row ctx 1 1.0;
+      if state.dora_factor.(tid) > 0 then fill_row ctx 2 1.0;
+      if not at_kan_select
+      then ctx.mask.(action_space - 1) <- true
+      else if cans.can_daiminkan
+      then ctx.mask.(tid) <- true
+    | None -> ());
+  ctx.idx <- ctx.idx + 3;
+  if cans.can_discard
+  then (
+    let discards = discard_candidates_aka state in
+    Array.iteri
+      (fun tid b ->
+         if b
+         then (
+           let deaka_tid = Tiles.deaka tid in
+           assign_row ctx 0 deaka_tid 1.0;
+           if not at_kan_select then ctx.mask.(tid) <- true))
+      discards;
+    for tid = 0 to 33 do
+      if state.keep_shanten_discards.(tid) then assign_row ctx 1 tid 1.0;
+      if state.next_shanten_discards.(tid) then assign_row ctx 2 tid 1.0
+    done;
+    if state.shanten <= 1
+    then (
+      let unconditional = discard_candidates_with_unconditional_tenpai_aka state in
+      Array.iteri (fun tid b -> if b then assign_row ctx 3 (Tiles.deaka tid) 1.0) unconditional);
+    if state.riichi_declared.(0) then fill_row ctx 4 1.0);
+  ctx.idx <- ctx.idx + 5;
+  if cans.can_riichi
+  then (
+    fill_row ctx 0 1.0;
+    if not at_kan_select then ctx.mask.(37) <- true);
+  ctx.idx <- ctx.idx + 1;
+  if cans.can_chi_low
+  then (
+    fill_row ctx 0 1.0;
+    if not at_kan_select then ctx.mask.(38) <- true);
+  if cans.can_chi_mid
+  then (
+    fill_row ctx 1 1.0;
+    if not at_kan_select then ctx.mask.(39) <- true);
+  if cans.can_chi_high
+  then (
+    fill_row ctx 2 1.0;
+    if not at_kan_select then ctx.mask.(40) <- true);
+  ctx.idx <- ctx.idx + 3;
+  if cans.can_pon
+  then (
+    fill_row ctx 0 1.0;
+    if not at_kan_select then ctx.mask.(41) <- true);
+  ctx.idx <- ctx.idx + 1;
+  if cans.can_daiminkan
+  then (
+    fill_row ctx 0 1.0;
+    if not at_kan_select then ctx.mask.(42) <- true);
+  ctx.idx <- ctx.idx + 1;
+  if cans.can_ankan
+  then (
+    List.iter
+      (fun tid ->
+         assign_row ctx 0 tid 1.0;
+         if at_kan_select then ctx.mask.(tid) <- true)
+      state.ankan_candidates;
+    if not at_kan_select then ctx.mask.(42) <- true);
+  ctx.idx <- ctx.idx + 1;
+  if cans.can_kakan
+  then (
+    List.iter
+      (fun tid ->
+         assign_row ctx 0 tid 1.0;
+         if at_kan_select then ctx.mask.(tid) <- true)
+      state.kakan_candidates;
+    if not at_kan_select then ctx.mask.(42) <- true);
+  ctx.idx <- ctx.idx + 1;
+  if can_agari cans
+  then (
+    fill_row ctx 0 1.0;
+    if not at_kan_select then ctx.mask.(43) <- true);
+  ctx.idx <- ctx.idx + 1;
+  if cans.can_ryukyoku
+  then (
+    fill_row ctx 0 1.0;
+    if not at_kan_select then ctx.mask.(44) <- true);
+  ctx.idx <- ctx.idx + 1;
+  (* Version 4 SP features *)
+  if version = 4
+  then (
+    let cur_shanten = real_time_shanten state in
+    let can_calc = state.tiles_left >= 4 && cur_shanten >= 0 in
+    let tables_opt =
+      if not can_calc
+      then None
+      else (
+        let can_discard = ref state.last_cans.can_discard in
+        let tsumos_left, calc_haitei =
+          if !can_discard
+          then state.tiles_left / 4, state.tiles_left mod 4 = 0
+          else (
+            let target = rel state state.last_cans.target_actor in
+            let left = max 0 (state.tiles_left - (4 - target)) in
+            left / 4, left mod 4 = 0)
+        in
+        if tsumos_left < 1
+        then None
+        else (
+          let num_doras_in_fuuro =
+            if state.is_menzen && state.ankan_overview.(0) = []
+            then 0
+            else (
+              let num_doras_in_tehai =
+                List.fold_left
+                  (fun acc ind -> acc + state.tehai.(Tiles.next ind))
+                  0
+                  state.dora_indicators
+              in
+              let num_akas =
+                let c = ref 0 in
+                for i = 0 to 2 do
+                  if state.akas_in_hand.(i) then incr c
+                done;
+                !c
+              in
+              state.doras_owned.(0) - num_doras_in_tehai - num_akas)
+          in
+          let prefer_riichi = state.scores.(0) >= 1000 in
+          let calc_double_riichi = !can_discard && state.can_w_riichi in
+          let tehai = Array.copy state.tehai in
+          let akas_in_hand = Array.copy state.akas_in_hand in
+          let is_discard_after_riichi = !can_discard && state.riichi_accepted.(0) in
+          if is_discard_after_riichi
+          then (
+            match state.last_self_tsumo with
+            | Some last_tsumo ->
+              let tid = Tiles.deaka last_tsumo in
+              tehai.(tid) <- tehai.(tid) - 1;
+              (match last_tsumo with
+               | t when t = Tiles.tile_id_5mr -> akas_in_hand.(0) <- false
+               | t when t = Tiles.tile_id_5pr -> akas_in_hand.(1) <- false
+               | t when t = Tiles.tile_id_5sr -> akas_in_hand.(2) <- false
+               | _ -> ());
+              can_discard := false
+            | None -> ());
+          let sp_config =
+            Sp.create_config
+              ~tehai_len_div3:state.tehai_len_div3
+              ~chis:state.chis
+              ~pons:state.pons
+              ~minkans:state.minkans
+              ~ankans:state.ankans
+              ~bakaze:state.bakaze
+              ~jikaze:state.jikaze
+              ~is_menzen:state.is_menzen
+              ~num_doras_in_fuuro
+              ~dora_indicators:state.dora_indicators
+              ~calc_double_riichi
+              ~calc_haitei
+              ~prefer_riichi
+              ~sort_result:true
+              ~maximize_win_prob:false
+              ~calc_tegawari:false
+              ~calc_shanten_down:false
+          in
+          let sp_init_state =
+            Sp.create_init_state
+              ~tehai
+              ~akas_in_hand
+              ~tiles_seen:state.tiles_seen
+              ~akas_seen:state.akas_seen
+          in
+          match Sp.calc sp_config sp_init_state !can_discard tsumos_left cur_shanten with
+          | Ok candidates ->
+            if is_discard_after_riichi
+            then (
+              match candidates with
+              | first :: rest ->
+                let updated =
+                  { first with tile = Option.get state.last_self_tsumo }
+                in
+                Some (updated :: rest)
+              | [] -> Some [])
+            else Some candidates
+          | Error _ -> None))
+    in
+    match tables_opt with
+    | Some (best :: _ as candidates) ->
+      let max_ev = best.exp_values.(0) in
+      let v1 = max 0.0 (min 100000.0 max_ev) /. 100000.0 in
+      fill_row ctx 0 v1;
+      let v2 = max 0.0 (min 30000.0 max_ev) /. 30000.0 in
+      fill_row ctx 1 v2;
+      ctx.idx <- ctx.idx + 2;
+      (* Required tiles *)
+      if state.last_cans.can_discard
+      then (
+        List.iter
+          (fun (c : Sp.candidate) ->
+             let discard_tid = Tiles.deaka c.tile in
+             List.iter
+               (fun (r : Sp.required_tile) ->
+                  let required_tid = Tiles.deaka r.tile in
+                  let row_offset = if c.shanten_down then 34 + discard_tid else discard_tid in
+                  assign_row ctx row_offset required_tid 1.0)
+               c.required_tiles)
+          candidates;
+        ctx.idx <- ctx.idx + (2 * 34);
+        (* Max required tiles tid *)
+        let max_req_c =
+          List.fold_left
+            (fun acc c -> if Sp.cmp_by Sp.NotShantenDown c acc < 0 then c else acc)
+            best
+            candidates
+        in
+        assign_row ctx 0 (Tiles.deaka max_req_c.tile) 1.0;
+        ctx.idx <- ctx.idx + 2)
+      else (
+        ctx.idx <- ctx.idx + (2 * 34) + 1;
+        List.iter
+          (fun (r : Sp.required_tile) ->
+             assign_row ctx 0 (Tiles.deaka r.tile) 1.0)
+          best.required_tiles;
+        ctx.idx <- ctx.idx + 1);
+      (* SP Table *)
+      if best.tenpai_probs.(0) > 0.0
+      then (
+        let ev_scale = if max_ev < 1.0 then 0.0 else 1.0 /. max_ev in
+        if state.last_cans.can_discard
+        then
+          List.iter
+            (fun (c : Sp.candidate) ->
+               let tid = Tiles.deaka c.tile in
+               let n = Array.length c.tenpai_probs in
+               for turn = 0 to n - 1 do
+                 if c.tenpai_probs.(turn) > 0.0
+                 then (
+                   assign_row ctx turn tid c.tenpai_probs.(turn);
+                   assign_row ctx (turn + 17) tid c.win_probs.(turn);
+                   assign_row ctx (turn + 34) tid (min 1.0 (c.exp_values.(turn) *. ev_scale)))
+               done)
+            candidates
+        else
+          let n = Array.length best.tenpai_probs in
+          for turn = 0 to n - 1 do
+            if best.tenpai_probs.(turn) > 0.0
+            then (
+              fill_row ctx turn best.tenpai_probs.(turn);
+              fill_row ctx (turn + 17) best.win_probs.(turn);
+              fill_row ctx (turn + 34) (min 1.0 (best.exp_values.(turn) *. ev_scale)))
+          done);
+      ctx.idx <- ctx.idx + 51
+    | _ ->
+      (* Fallback: minimal tsumo agari *)
+      let min_tsumo_agari =
+        match agari_points state false [] with
+        | Ok point -> float_of_int (Point.tsumo_total point (is_oya state))
+        | Error _ -> 0.0
+      in
+      let v1 = max 0.0 (min 100000.0 min_tsumo_agari) /. 100000.0 in
+      fill_row ctx 0 v1;
+      let v2 = max 0.0 (min 30000.0 min_tsumo_agari) /. 30000.0 in
+      fill_row ctx 1 v2;
+      ctx.idx <- ctx.idx + 2 + (2 * 34) + 2 + 51);
+  { features = ctx.arr; mask = ctx.mask }
+;;

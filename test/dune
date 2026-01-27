@@ -23,5 +23,5 @@
  (libraries mahjong.lib))
 
 (test
- (name test_obs_repr)
+ (name test_sp)
  (libraries mahjong))

@@ -270,34 +270,30 @@ let test_shanten_integration () =
 let test_waits () =
   Printf.printf "Testing waits calculation...\n";
   let state = State.create_player_state 0 in
-  (* Test Case 1: Ryanmen (two-sided) wait *)
-  state.tehai <- tehai_from_string "11m 234m 567m 111s 78p";
-  state.tehai_len_div3 <- 4;
-  State.update_shanten state;
-  assert (state.shanten = 0);
-  State.update_waits_and_furiten state;
-  assert_waits state [ Tiles.tile_id_6p; Tiles.tile_id_9p ];
-  (* Waits on 6p and 9p *)
 
-  (* Test Case 2: Junsei Chuuren Poutou (nine-sided wait) *)
-  state.tehai <- tehai_from_string "1112345678999m";
+  (* Test Case 1: "456m 78999p 789s 77z" *)
+  state.tehai <- tehai_from_string "456m 78999p 789s 77z";
   state.tehai_len_div3 <- 4;
   State.update_shanten state;
-  assert (state.shanten = 0);
+  State.update_waits_and_furiten state;
+  assert_waits state [ Tiles.tile_id_6p; Tiles.tile_id_9p; Tiles.tile_id_C ];
+
+  (* Test Case 2: "2344445666678s" *)
+  state.tehai <- tehai_from_string "2344445666678s";
+  state.tehai_len_div3 <- 4;
+  State.update_shanten state;
   State.update_waits_and_furiten state;
   assert_waits
     state
-    [ Tiles.tile_id_1m
-    ; Tiles.tile_id_2m
-    ; Tiles.tile_id_3m
-    ; Tiles.tile_id_4m
-    ; Tiles.tile_id_5m
-    ; Tiles.tile_id_6m
-    ; Tiles.tile_id_7m
-    ; Tiles.tile_id_8m
-    ; Tiles.tile_id_9m
+    [ Tiles.tile_id_1s
+    ; Tiles.tile_id_2s
+    ; Tiles.tile_id_3s
+    ; Tiles.tile_id_5s
+    ; Tiles.tile_id_7s
+    ; Tiles.tile_id_8s
+    ; Tiles.tile_id_9s
     ];
-  (* Waits on all manzu tiles *)
+
   Printf.printf "  waits tests passed\n"
 ;;
 
@@ -478,61 +474,180 @@ let test_can_chi () =
   Printf.printf "  can_chi tests passed\n"
 ;;
 
-(** Test furiten tracking *)
+(** Test furiten tracking - Comprehensive test matching Rust implementation *)
 let test_furiten () =
-  Printf.printf "Testing furiten tracking...\n";
+  Printf.printf "Testing furiten tracking (comprehensive)...\n";
   let state = State.create_player_state 0 in
-  (* Test 1: Not furiten when no winning tiles are discarded *)
-  state.tehai.(0) <- 3;
-  (* 1m x3 *)
-  state.tehai.(1) <- 1;
-  (* 2m *)
-  state.tehai.(2) <- 1;
-  (* 3m *)
-  state.tehai_len_div3 <- 1;
-  State.update_shanten state;
-  State.update_waits_and_furiten state;
+
+  (* Initial state setup matching Rust test *)
+  let tehais =
+    [| (* Player 0: 23406m 456789p 58s (using aka for 5m) *)
+       Hand.hand_with_aka "23406m 456789p 58s" |> Result.get_ok |> Hand.tile37_to_array
+     ; Array.make 13 Tiles.tile_id_unknown
+     ; Array.make 13 Tiles.tile_id_unknown
+     ; Array.make 13 Tiles.tile_id_unknown
+    |]
+  in
+  let event =
+    Mjai.Start_kyoku
+      { bakaze = Tiles.tile_id_E
+      ; dora_marker = Tiles.tile_id_3p
+      ; kyoku = 1
+      ; honba = 0
+      ; kyotaku = 0
+      ; oya = 0
+      ; scores = [| 25000; 25000; 25000; 25000 |]
+      ; tehais
+      }
+  in
+  State.update state event;
+
+  (* Tsumo 8s *)
+  State.update state (Mjai.Tsumo { actor = 0; pai = Tiles.tile_id_8s });
+  (* Verify no waits yet (shanten 1) *)
+  assert (state.shanten = 1);
+  for i = 0 to 33 do assert (not state.waits.(i)) done;
+
+  (* Dahai 5s *)
+  State.update state (Mjai.Dahai { actor = 0; pai = Tiles.tile_id_5s; tsumogiri = false });
+  assert (state.shanten = 0);
+  (* Waits: 1m, 4m, 7m *)
+  assert (state.waits.(Tiles.tile_id_1m));
+  assert (state.waits.(Tiles.tile_id_4m));
+  assert (state.waits.(Tiles.tile_id_7m));
   assert (not state.at_furiten);
-  Printf.printf "  Test 1 passed: not furiten with no discards\n";
-  (* Test 2: Furiten when a winning tile is discarded *)
-  state.tehai.(Tiles.tile_id_1m) <- 2;
-  (* 11m *)
-  state.tehai.(Tiles.tile_id_2m) <- 1;
-  (* 2m *)
-  state.tehai.(Tiles.tile_id_3m) <- 1;
-  (* 3m *)
-  state.tehai_len_div3 <- 1;
-  (* Simulate discarding 2m *)
-  state.discarded_tiles.(Tiles.tile_id_2m) <- true;
-  State.update_shanten state;
-  State.update_waits_and_furiten state;
-  (* Waiting on 1m or 3m, but 2m was discarded so not furiten yet *)
-  (* Actually, let me set up a better example *)
-  Array.fill state.tehai 0 34 0;
-  state.tehai.(Tiles.tile_id_1m) <- 2;
-  (* 11m *)
-  state.tehai.(Tiles.tile_id_9m) <- 2;
-  (* 99m *)
-  state.tehai_len_div3 <- 1;
-  (* Discard 1m (wait tile) *)
-  state.discarded_tiles.(Tiles.tile_id_1m) <- true;
-  State.update_shanten state;
-  State.update_waits_and_furiten state;
+
+  (* Tsumo/Dahai sequence for other players *)
+  State.update state (Mjai.Tsumo { actor = 1; pai = Tiles.tile_id_unknown });
+  let cans = update_json state {|{"type":"dahai","actor":1,"pai":"1m","tsumogiri":false}|} in
+  assert (not state.at_furiten);
+  assert cans.can_ron_agari;
+
+  State.update state (Mjai.Tsumo { actor = 2; pai = Tiles.tile_id_unknown });
+  (* Player 0 is now in temporary furiten because they passed on 1m *)
+  (* Note: In the Rust test logic, skipping a ron makes you furiten until next self turn *)
+  (* Let's check if update_json updates internal furiten state correctly on passing *)
+  (* In Rust, test_update calls update which returns candidates. If we don't act, we assume pass. *)
+  (* But here we just update state. Does state know we passed? *)
+  (* The state update logic should handle 'missed opportunity' if it tracks it. *)
+  (* Actually, the Rust test says:
+     ps.test_update(&Event::Tsumo { actor: 2 ... });
+     assert!(ps.at_furiten);
+  *)
+  (* This implies that AFTER the previous dahai (where we could ron), and BEFORE the next event,
+     we must have 'passed' or the state transition happened.
+     In MJAI, simply receiving the next event implies we didn't interrupt with Ron.
+     So receiving Tsumo for actor 2 means we passed on actor 1's discard. *)
+
   assert state.at_furiten;
-  Printf.printf "  Test 2 passed: furiten when wait tile discarded\n";
-  (* Test 3: Furiten reset with new hand *)
-  Array.fill state.tehai 0 34 0;
-  Array.fill state.discarded_tiles 0 34 false;
-  state.tehai.(Tiles.tile_id_1m) <- 3;
-  (* 111m *)
-  state.tehai.(Tiles.tile_id_2m) <- 1;
-  (* 2m *)
-  state.tehai_len_div3 <- 1;
-  State.update_shanten state;
-  State.update_waits_and_furiten state;
+
+  State.update state (Mjai.Dahai { actor = 2; pai = Tiles.tile_id_1s; tsumogiri = true });
+
+  State.update state (Mjai.Tsumo { actor = 3; pai = Tiles.tile_id_unknown });
+  let cans = update_json state {|{"type":"dahai","actor":3,"pai":"1m","tsumogiri":false}|} in
+  assert (state.shanten = 0);
+  assert (state.waits.(Tiles.tile_id_1m));
+  assert (state.waits.(Tiles.tile_id_4m));
+  assert (state.waits.(Tiles.tile_id_7m));
+  assert state.at_furiten;
+  assert (not cans.can_ron_agari);
+
+  (* Self turn clears temporary furiten *)
+  State.update state (Mjai.Tsumo { actor = 0; pai = Tiles.tile_id_3s });
+  assert state.at_furiten; (* Still furiten during draw? Wait, Rust says: *)
+  (*
+     ps.test_update(&Event::Tsumo { actor: 0 ... });
+     assert!(ps.at_furiten);
+     ps.test_update(&Event::Dahai { actor: 0 ... });
+     assert!(!ps.at_furiten);
+  *)
+  (* So it clears AFTER discard? Or maybe during turn it is still marked until discard? *)
+  (* Usually temporary furiten clears when you draw. Let's check Rust logic again. *)
+  (* Rust: assert!(ps.at_furiten) after Tsumo. Then Dahai. Then assert!(!ps.at_furiten). *)
+  (* So it seems it clears after the turn completes (dahai). *)
+
+  State.update state (Mjai.Dahai { actor = 0; pai = Tiles.tile_id_3s; tsumogiri = true });
   assert (not state.at_furiten);
-  Printf.printf "  Test 3 passed: furiten reset with new hand\n";
-  Printf.printf "  furiten tracking tests passed\n"
+
+  (* Continue sequence *)
+  State.update state (Mjai.Tsumo { actor = 1; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 1; pai = Tiles.tile_id_P; tsumogiri = true });
+
+  State.update state (Mjai.Tsumo { actor = 2; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 2; pai = Tiles.tile_id_C; tsumogiri = true });
+
+  State.update state (Mjai.Tsumo { actor = 3; pai = Tiles.tile_id_unknown });
+  let cans = update_json state {|{"type":"dahai","actor":3,"pai":"1m","tsumogiri":false}|} in
+  assert (not state.at_furiten);
+  assert cans.can_ron_agari;
+  let points = State.agari_points state true [] in
+  (match points with
+   | Ok p -> assert (p.ron = 5800)
+   | Error _ -> failwith "Expected ron agari");
+
+  (* Riichi furiten test *)
+  let cans = update_json state {|{"type":"tsumo","actor":0,"pai":"N"}|} in
+  assert cans.can_riichi;
+  State.update state (Mjai.Reach { actor = 0 });
+  State.update state (Mjai.Dahai { actor = 0; pai = Tiles.tile_id_N; tsumogiri = true });
+  State.update state (Mjai.Reach_accepted { actor = 0 });
+
+  (* Pass on winning tiles *)
+  State.update state (Mjai.Tsumo { actor = 1; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 1; pai = Tiles.tile_id_9m; tsumogiri = true });
+  State.update state (Mjai.Tsumo { actor = 2; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 2; pai = Tiles.tile_id_9m; tsumogiri = true });
+  State.update state (Mjai.Tsumo { actor = 3; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 3; pai = Tiles.tile_id_9m; tsumogiri = true });
+
+  (* Tsumo agari minogashi (skip tsumo win) *)
+  let cans = update_json state {|{"type":"tsumo","actor":0,"pai":"1m"}|} in
+  assert (state.waits.(Tiles.tile_id_1m));
+  assert (state.waits.(Tiles.tile_id_4m));
+  assert (state.waits.(Tiles.tile_id_7m));
+  assert (not state.at_furiten); (* Not furiten yet *)
+  assert cans.can_tsumo_agari;
+
+  (* Discard the winning tile -> Furiten forever (Riichi furiten rule) *)
+  State.update state (Mjai.Dahai { actor = 0; pai = Tiles.tile_id_1m; tsumogiri = true });
+  assert state.at_furiten;
+
+  (* Verify furiten persists *)
+  State.update state (Mjai.Tsumo { actor = 1; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 1; pai = Tiles.tile_id_4s; tsumogiri = true });
+  State.update state (Mjai.Tsumo { actor = 2; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 2; pai = Tiles.tile_id_4s; tsumogiri = true });
+  State.update state (Mjai.Tsumo { actor = 3; pai = Tiles.tile_id_unknown });
+  let cans = update_json state {|{"type":"dahai","actor":3,"pai":"7m","tsumogiri":true}|} in
+  assert state.at_furiten;
+  assert (not cans.can_ron_agari);
+
+  (* Next self turn - still furiten because Riichi *)
+  State.update state (Mjai.Tsumo { actor = 0; pai = Tiles.tile_id_8m });
+  State.update state (Mjai.Dahai { actor = 0; pai = Tiles.tile_id_8m; tsumogiri = true });
+  assert state.at_furiten;
+
+  (* Verify cannot ron *)
+  State.update state (Mjai.Tsumo { actor = 1; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 1; pai = Tiles.tile_id_E; tsumogiri = true });
+  State.update state (Mjai.Tsumo { actor = 2; pai = Tiles.tile_id_unknown });
+  let cans = update_json state {|{"type":"dahai","actor":2,"pai":"4m","tsumogiri":true}|} in
+  assert state.at_furiten;
+  assert (not cans.can_ron_agari);
+
+  State.update state (Mjai.Tsumo { actor = 3; pai = Tiles.tile_id_unknown });
+  State.update state (Mjai.Dahai { actor = 3; pai = Tiles.tile_id_E; tsumogiri = true });
+
+  (* Tsumo agari always possible even in furiten *)
+  let cans = update_json state {|{"type":"tsumo","actor":0,"pai":"4m"}|} in
+  assert state.at_furiten;
+  assert cans.can_tsumo_agari;
+  let points = State.agari_points state false [Tiles.tile_id_3m] in
+  (match points with
+   | Ok p -> assert (p.tsumo_ko = 6000)
+   | Error _ -> failwith "Expected tsumo agari");
+
+  Printf.printf "  furiten tracking (comprehensive) tests passed\n"
 ;;
 
 (** Test dora tracking *)
@@ -902,7 +1017,6 @@ let test_chi_at_0_shanten () =
   Printf.printf "    exact_shanten=%d (expected -1)\n" exact_shanten;
   Printf.printf "  Can ron agari: %b (expected true)\n" state.last_cans.can_ron_agari;
   assert state.last_cans.can_ron_agari;
-  Printf.printf "  Can chi high: %b (expected true)\n" state.last_cans.can_chi_high;
   assert state.last_cans.can_chi_high;
   (* Now chi the 6s *)
   let _ =
@@ -910,10 +1024,8 @@ let test_chi_at_0_shanten () =
       state
       {|{"type":"chi","actor":0,"target":3,"consumed":["4s","5s"],"pai":"6s"}|}
   in
-  Printf.printf "  After chi - shanten: %d (expected 0)\n" state.shanten;
   assert (state.shanten = 0);
   (* Check if at_furiten is set *)
-  Printf.printf "  After chi - at_furiten: %b (expected true)\n" state.at_furiten;
   assert state.at_furiten;
   Printf.printf "  chi_at_0_shanten tests passed\n"
 ;;

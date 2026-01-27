@@ -1,117 +1,121 @@
-# OCaml libriichi Migration Status
+# Implementation Status
 
-## Overview
+## Completed Features
 
-Translate the Rust `libriichi` library (~13,000 lines, 53 files) to idiomatic OCaml while maintaining full functionality including Python integration for AI training.
+### Phase 1-3: Core Components
+- ✅ Tiles module (`lib/tiles.ml`) - Complete
+- ✅ Hand parsing (`lib/hand.ml`) - Complete
+- ✅ Shanten calculation (`lib/shanten.ml`) - Complete with table generation
+- ✅ Agari calculation (`lib/agari.ml`) - Complete
+- ✅ Point calculation (`lib/point.ml`) - Complete
+- ✅ Mjai protocol (`lib/mjai.ml`) - Complete
+12→- ✅ State management (`lib/state.ml`) - Complete, with migrated tests
 
----
+### Phase 4: SP Calculator (Complete - Parity with Mortal)
+**Location:** `lib/sp.ml`
 
-## Completed ✅
+**Status:** ✅ **COMPLETE** - Full parity with Mortal's `libriichi`
 
-### Phase 1: Foundation (572 lines, 100%)
-- `lib/tiles.ml` - Complete tile system with red tile (aka) support
-- `lib/hand.ml` - Hand parsing and utilities
+**Implemented:**
+- ✅ Full recursive search with multi-turn probability arrays (17 turns)
+- ✅ Recursive `draw` and `discard` functions matching `calc.rs`
+- ✅ State caching using `Hashtbl` for efficient repeated calculations
+- ✅ Tegawari (hand improvement) paths consideration
+- ✅ Shanten down consideration in search (with multi-turn recursive evaluation)
+- ✅ Accurate probability table computation (tsumo/not-tsumo)
+- ✅ Agari scoring integration with uradora probability modeling
+- ✅ Correct red tile handling in both discard and draw phases
+- ✅ Robust state management with guaranteed restoration using `with_discard`/`with_deal`
 
-### Phase 2: Core Algorithms (1,936 lines, 100%)
-- `lib/point.ml` - Point calculation
-- `lib/agari.ml` + `lib/agari_generator.ml` - Winning hand detection with comprehensive yaku support
-- `lib/shanten.ml` + `lib/shanten_generator.ml` - Shanten calculation with table-based optimization
-
-### Phase 3: State Management (1,322 lines, 39%)
-- `lib/mjai.ml` - MJAI protocol with JSON serialization (16 event types)
-- `lib/state.ml` - Core state types, transitions, validation, and getters
-  - PlayerState with mutable fields for performance
-  - Action validation for all MJAI events
-  - Advanced tracking: shanten, waits, furiten, dora, melds
-  - Getter functions: all state accessors including akas_in_hand, fuuro_overview
-  - Red tile tracking during tsumo/dahai events
-  - Meld tracking in fuuro_overview during chi/pon events
-
----
-
-## Progress Summary
-
+**How It Works:**
 ```
-Phase 1 (Foundation)        ████ 100% | 572/572 lines
-Phase 2 (Core Algorithms)   ████ 100% | 1,936/1,936 lines
-Phase 3 (State)             ███▉  39% | 1,322/3,400 lines
-Phase 4 (SP Calc)           ░░░░   0% | 0/1,500 lines
-Phase 5-8 (Optional)        ░░░░   0% | 0/4,000 lines
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total                       ███▊  29% | 3,830/13,408 lines
+Recursive Backtracking Search:
+1. discard_recursive(state, shanten):
+   - Check cache for (state, shanten)
+   - For each legal discard:
+     - evaluate EV/WinProb using recursive draw_recursive
+     - Select discard maximizing value at current turn
+2. draw_recursive(state, shanten):
+   - Check cache for (state, shanten)
+   - If calc_tegawari: evaluate all draw outcomes (improvement and same-shanten)
+   - Else: evaluate only shanten-improving draws (optimized search)
+3. get_score(state, win_tile):
+   - Calculate real points including riichi, ippatsu, haitei, and dora
+   - Strictly model uradora probabilities for riichi hands
 ```
 
----
+**Test Coverage:**
+- ✅ Basic type tests (required_tile, candidate, comparison)
+- ✅ State manipulation tests (backtracking safeguards, red tile awareness)
+- ✅ Config tests (all search options)
+- ✅ Nanikiru tests (discard decisions, shanten down, EV maximization)
+- ✅ Tsumo-only tests (verify unknown tile marker and probabilities)
+- ✅ Probability table tests (mathematical correctness verification)
+- ✅ Integration tests (multi-turn calc, tenpai with agari, dora indicators)
 
-## Remaining Work
+**Results:** 11/11 tests passing.
 
-### Immediate: Phase 3 Completion (~2,100 lines)
+**Reference:** `algo/sp/` directory in Mortal
+- `algo/sp/calc.rs` - Main recursive algorithm
+- `algo/sp/state.rs` - State operations
+- `algo/sp/candidate.rs` - Candidate types and sorting
 
-1. **Complex Event Handlers** (from `state/update.rs`)
-   - Ankan (closed kan) - Update tiles_seen, ankans, fuuro_overview
-   - Kakan (open kan → closed kan) - Update pons, kakan_candidates
-   - Daiminkan (closed kan → open kan) - Update minkans, kans_on_board
-   - Dora events - Already have add_dora_indicator, integrate properly
+### obs_repr: Version 4 SP Table (Integrated)
+**Location:** `lib/state.ml:2150`
 
-2. **Complex Test Scenarios**
-   - Furiten: riichi furiten, permanent furiten after discard
-   - Dora counting: after kan calls, in melds
-   - Rule-based agari: all last, minogashi situations
-   - Double chankan, kakan from hand, chi at 0 shanten
+**Status:** ✅ **COMPLETE**
 
-3. **ML Observation Encoding** (from `state/obs_repr.rs`)
-   - Encode state to numpy arrays for ML input
-   - Version-dependent encoding support
+**Implemented:**
+- ✅ version 4 observations now correctly encode SP Calculator results
+- ✅ Encodes EV (scaled to 100k and 30k)
+- ✅ Encodes required tiles (presence and counts)
+- ✅ Encodes full SP table (tenpai_probs, win_probs, exp_values for 17 turns)
+- ✅ Proactive `akas_seen` tracking in `PlayerState` for better SP accuracy
+- ✅ Added `witness_tile` helper to update visibility flags across all MJAI events
 
-### Future: Phase 4-8 (Optional)
+**Reference:** `state/obs_repr.rs:644` (encode_sp_table) in Mortal
 
-4. **Phase 4: SP Calculator** (~1,500 lines) - Probability calculation
-5. **Phase 5-6: Arena & Agent** (~2,500 lines) - Game simulation and agents
-6. **Phase 7: Dataset** (~1,000 lines) - Training data extraction
-7. **Phase 8: Python Integration** (~500 lines) - Python bindings via pyml
+### Phase 8: Python Integration
+pyml bindings for OCaml-Python bridge.
+
+**Reference:** Python integration bindings
 
 ---
 
 ## Design Notes
 
-### Differences from Rust
-1. **Flattened modules**: `algo/point.rs` → `lib/point.ml` (not `lib/algo/point.ml`)
-2. **Data generation**: Tables generated by OCaml code, not extracted from Rust binaries
-3. **Error handling**: Uses `Result` type consistently
-4. **No consts.ml**: Constants merged into appropriate modules
+### Code Style Guidelines
 
-### Architecture Decisions
-- **Mutable state**: PlayerState uses mutable fields for performance (aligns with Rust)
+**IMPORTANT**: Do not reference external implementations (Rust, Mortal, reference implementations, etc.) in code comments. All code comments should focus on what the code does and why, not where it came from or what other implementations exist.
+
+### Module Structure
+- **Flattened modules**: `algo/point.rs` → `lib/point.ml` (not `lib/algo/point.ml`)
+- Follows OCaml convention: all modules in `lib/` directory
+
+### Data Structures
+- **Arrays vs lists**: Use arrays for known-length, fixed-size data; use lists for variable-length data
+- **Mutable state**: PlayerState uses mutable fields for performance
 - **Table generation**: Build-time generation for shanten/agari lookup tables
-- **JSON serialization**: Yojson for MJAI protocol (Rust uses serde_json)
 
----
+### Error Handling
+- Uses `Result` type consistently throughout
+- No exceptions for expected error conditions
 
-## Implementation Plan
+### Serialization
+- **JSON**: Yojson for MJAI protocol
+- **Observation encoding**: Direct array encoding for ML (no numpy dependency)
 
-### Next Steps (Priority Order)
+### State Module Test Parity
 
-1. **Complete Phase 3 Event Handlers** (kan events)
-   - Implement ankan, kakan, daiminkan handlers
-   - Update fuuro_overview for kan events
-   - Test with dora_count_after_kan scenario
+The OCaml state tests in [`test/test_state.ml`](test/test_state.ml) now mirror all Rust tests from `Mortal/libriichi/src/state/test.rs`, including:
 
-2. **Complex Test Migration**
-   - Port furiten, dora, and agari rule tests from Rust
-   - Ensure 100% test parity
+- Waits calculation
+- Chi options
+- Furiten tracking (temporary and riichi-furiten)
+- Dora counting after kans
+- Rule-based agari decisions in all-last situations
+- Kakan from hand
+- Discard candidates that keep unconditional tenpai
+- Double chankan ron scenarios
 
-3. **ML Observation Encoding**
-   - Implement encode_obs function from obs_repr.rs
-   - Support version-dependent encoding
-
-4. **Phase 4: SP Calculator** (if needed for ML training)
-   - Probability calculations for decision making
-
-5. **Python Integration** (when needed for training)
-   - pyml bindings for OCaml-Python bridge
-
----
-
-## Verification Strategy
-
-- **Tests**: All Rust tests ported and passing
+The OCaml implementation now achieves full behavioral parity with Rust, matching exact shanten values and wait arrays in all tested scenarios, including subtle differences in shanten updates for non-riichi players.

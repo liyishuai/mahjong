@@ -78,7 +78,8 @@ type agari_calculator =
     @return true if the hand is a winning configuration *)
 val is_agari : int array -> bool
 
-(** [is_agari_ref tiles34] checks if a hand is a winning hand (reference implementation).
+(** [is_agari_ref tiles34] checks if a hand is a winning hand using straightforward algorithm.
+    This is a clear reference implementation used for verification of optimized versions.
 
     @param tiles34 Array of 34 tile counts
     @return true if the hand is a winning configuration *)
