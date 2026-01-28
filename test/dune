@@ -1,0 +1,36 @@
+(test
+ (name test_tile)
+ (libraries mahjong alcotest))
+
+(test
+ (name test_open)
+ (libraries mahjong alcotest))
+
+(test
+ (name test_hand)
+ (libraries mahjong alcotest))
+
+(test
+ (name test_shanten)
+ (libraries mahjong alcotest)
+ (deps (glob_files resources/shanten_testcases/*.txt)))
+
+(test
+ (name test_yaku)
+ (libraries mahjong alcotest))
+
+(test
+ (name test_win_cache)
+ (libraries mahjong alcotest))
+
+(test
+ (name test_action)
+ (libraries mahjong alcotest))
+
+(test
+ (name test_wall)
+ (libraries mahjong alcotest))
+
+(test
+ (name test_event)
+ (libraries mahjong alcotest))
